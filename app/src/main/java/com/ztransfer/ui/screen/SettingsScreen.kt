@@ -170,12 +170,19 @@ import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
 import com.ztransfer.frame.photoFrameDatePatternExample
 import com.ztransfer.frame.photoFrameTimePatternExample
 import com.ztransfer.frame.resolvedPhotoFrameMetadataSettings
+import com.ztransfer.frame.usesUniformPhotoFrameBorder
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.grain.photoGrainSeed
 import com.ztransfer.filter.PhotoFilterPreset
 import com.ztransfer.filter.BuiltInPhotoFilters
 import com.ztransfer.filter.PhotoFilterCategory
 import com.ztransfer.filter.orderForCategory
 import com.ztransfer.filter.PhotoFilterRenderer
+import com.ztransfer.filter.photoFilterCatalogKey
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.filter.LutAdjustments
+import com.ztransfer.effects.photoFilterAdjustmentsFor
 import com.ztransfer.filter.normalizePhotoFilterIntensity
 import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.license.LicenseManager
@@ -184,6 +191,7 @@ import com.ztransfer.update.AppUpdateManager
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.PROGRESSIVE_HOLD_HAPTIC_DURATION_MS
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.ui.util.LocalHapticsEnabled
 import com.ztransfer.util.formatDegreesMinutesCoordinates
 import com.ztransfer.util.formatDegreesMinutesLatitude
 import com.ztransfer.util.formatDegreesMinutesLongitude
@@ -194,6 +202,7 @@ import com.ztransfer.gps.GpsPlaceLookupState
 import com.ztransfer.gps.GpsPlaceLookupStatus
 import com.ztransfer.gps.GpsUpdateFrequency
 import com.ztransfer.gps.GpsViewModel
+import com.ztransfer.gps.canSyncNow
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.effectivePhotoFrameWatermark
 import com.ztransfer.viewmodel.freeEditionPhotoFrameWatermark
@@ -236,6 +245,7 @@ fun SettingsOverlay(
     viewModel: TransferViewModel,
     showPhotoEffectsEntry: Boolean = true,
     effectPreviewSource: Bitmap? = null,
+    effectPreviewSourceName: String = "",
     effectPreviewCameraManufacturer: String? = null,
     effectPreviewCameraModel: String? = null,
     effectPreviewExif: PhotoExif? = null,
@@ -362,12 +372,47 @@ fun SettingsOverlay(
         mutableStateOf(state.selectedPhotoFilterId ?: state.photoFilters.firstOrNull()?.id)
     }
     var filterDraftEnabled by remember { mutableStateOf(state.photoFilterEnabled) }
+    var grainDraft by remember { mutableStateOf(state.photoGrain.normalized()) }
     var filterDraftIntensity by remember {
         mutableIntStateOf(state.photoFilterIntensityPercent)
     }
+    var filterDraftAdjustments by remember { mutableStateOf(state.photoFilterAdjustments) }
     val photoLutDraft = rememberPhotoLutDraft("transfer", state.photoLut) { filterDraftEnabled = false }
+    val photoNp3Draft = rememberPhotoNp3Draft(
+        "transfer", state.photoFilters.firstOrNull { it.id == filterDraftId },
+        onSelected = { preset, explicit ->
+            viewModel.registerPhotoFilter(preset)
+            filterDraftId = preset.id
+            filterDraftIntensity = photoFilterCatalogKey(preset.id)
+                ?.let(viewModel.state.value.transferPhotoFilterIntensities::get)
+                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            filterDraftAdjustments = photoFilterAdjustmentsFor(
+                preset.id, viewModel.state.value.transferPhotoFilterAdjustments,
+            )
+            // Refresh may update a saved recipe while it is switched off or a LUT is active.
+            if (explicit) {
+                photoLutDraft.off()
+                filterDraftEnabled = true
+            }
+        },
+        onUnavailable = {
+            filterDraftEnabled = false
+            filterDraftId = null
+            filterDraftIntensity = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            filterDraftAdjustments = LutAdjustments()
+        },
+    )
+    LaunchedEffect(filterDraftEnabled, visibleModules, photoLutDraft.selection) {
+        if (!filterDraftEnabled || !visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) || photoLutDraft.selection != null) {
+            photoNp3Draft.cancelPending()
+        }
+    }
     fun applyModuleVisibility(mask: Int) {
-        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterDraftEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) {
+            photoNp3Draft.cancelPending()
+            filterDraftEnabled = false
+        }
+        if (!mask.showsPhotoEffect(PhotoEffectModule.GRAIN)) grainDraft = grainDraft.copy(enabled = false)
         if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
         if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) frameDraftBorderEnabled = false
         if (!mask.showsPhotoEffect(PhotoEffectModule.WATERMARK)) watermarkDraft = watermarkDraft.copy(enabled = false)
@@ -454,9 +499,12 @@ fun SettingsOverlay(
             enabled = filterDraftEnabled && filterDraftId != null,
             lut = photoLutDraft.selection,
             lutUri = photoLutDraft.selectedUri?.toString(),
+            np3Uri = photoNp3Draft.sourceFor(filterDraftId),
+            adjustments = filterDraftAdjustments,
         )
     }
     fun commitPhotoEffectsDraft() {
+        viewModel.setPhotoGrain(grainDraft)
         commitPhotoFilterDraft()
         commitPhotoFrameDraft()
     }
@@ -522,6 +570,7 @@ fun SettingsOverlay(
 
     AnchorPopup(
         anchorBounds = openingAnchorBounds,
+        onClosing = photoNp3Draft::cancelPending,
         onDismiss = {
             if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
             onDismiss()
@@ -577,11 +626,8 @@ fun SettingsOverlay(
                     .navigationBarsPadding()
                     .padding(bottom = 28.dp)
             ) {
-                Surface(
+                GlassHintSurface(
                     shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, colors.glassPanelBorder)
                 ) {
                     Text(
                         text = footerHintText,
@@ -597,6 +643,7 @@ fun SettingsOverlay(
         BackHandler(
             enabled = settingsPage != SettingsPage.MAIN && expandedEffectsPreview == null
         ) {
+            photoNp3Draft.cancelPending()
             if (effectsOnly) close()
             else {
                 if (settingsPage == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
@@ -659,6 +706,7 @@ fun SettingsOverlay(
                     GlassBackButton(
                         onClick = {
                             focusManager.clearFocus()
+                            photoNp3Draft.cancelPending()
                             if (effectsOnly) close()
                             else {
                                 if (page == SettingsPage.EFFECTS) commitPhotoEffectsDraft()
@@ -760,11 +808,12 @@ fun SettingsOverlay(
                 val previewFilter = photoLutDraft.selection ?: state.photoFilters
                     .firstOrNull { it.id == filterDraftId }
                     ?.takeIf { filterDraftEnabled }
-                    ?.let { PhotoFilterSelection(it, filterDraftIntensity) }
+                    ?.let { PhotoFilterSelection(it, filterDraftIntensity, filterDraftAdjustments) }
                 val previewFilterPrefetch = remember(
                     state.photoFilters,
                     state.favoritePhotoFilters,
                     state.transferPhotoFilterIntensities,
+                    state.transferPhotoFilterAdjustments,
                     filterDraftId,
                     filterDraftEnabled,
                     photoLutDraft.selection,
@@ -773,6 +822,7 @@ fun SettingsOverlay(
                         filters = state.photoFilters,
                         favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = state.transferPhotoFilterIntensities,
+                        rememberedAdjustments = state.transferPhotoFilterAdjustments,
                         selectedId = filterDraftId,
                         enabled = filterDraftEnabled && photoLutDraft.selection == null,
                     )
@@ -829,7 +879,8 @@ fun SettingsOverlay(
                         if (previewSource != null) {
                             PhotoEffectsRenderedPreview(
                                 source = previewSource.bitmap,
-                                showSourceWhileRendering = effectsOnly,
+                                sourceName = effectPreviewSourceName,
+                                grain = grainDraft,
                                 metadata = effectPreviewMetadata,
                                 sourceRotationQuarterTurns = previewSource.quarterTurns,
                                 requestedRotationQuarterTurns = effectPreviewRotationQuarterTurns,
@@ -864,21 +915,35 @@ fun SettingsOverlay(
                 Spacer(Modifier.height(10.dp))
                 PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null) {
                     PhotoFilterEditor(
+                        np3 = photoNp3Draft,
+                        active = settingsPage == SettingsPage.EFFECTS &&
+                            visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null,
                         filters = state.photoFilters,
                         favoriteFilters = state.favoritePhotoFilters,
                         rememberedIntensities = state.transferPhotoFilterIntensities,
                         selectedId = filterDraftId,
                         enabled = filterDraftEnabled && photoLutDraft.selection == null,
                         intensityPercent = filterDraftIntensity,
+                        adjustments = filterDraftAdjustments,
                         onDisabled = { filterDraftEnabled = false },
                         onSelected = {
                             photoLutDraft.off()
                             filterDraftId = it
+                            filterDraftIntensity = photoFilterCatalogKey(it)
+                                ?.let(viewModel.state.value.transferPhotoFilterIntensities::get)
+                                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+                            filterDraftAdjustments = photoFilterAdjustmentsFor(
+                                it, viewModel.state.value.transferPhotoFilterAdjustments,
+                            )
                             filterDraftEnabled = true
                         },
                         onIntensityChanged = { filterId, intensity ->
                             filterDraftIntensity = intensity
                             viewModel.rememberTransferPhotoFilterIntensity(filterId, intensity)
+                        },
+                        onAdjustmentsChanged = { filterId, adjustments ->
+                            if (filterId == filterDraftId) filterDraftAdjustments = adjustments
+                            viewModel.rememberTransferPhotoFilterAdjustments(filterId, adjustments)
                         },
                         onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
                         hapticsEnabled = state.hapticsEnabled,
@@ -888,6 +953,22 @@ fun SettingsOverlay(
                     visible = visibleModules.showsPhotoEffect(PhotoEffectModule.LUT) && (!(filterDraftEnabled && state.photoFilters.any { it.id == filterDraftId }) || photoLutDraft.selection != null),
                 ) {
                     PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+                }
+                PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.GRAIN)) {
+                    PhotoGrainEditor(
+                        settings = grainDraft,
+                        onStyleSelected = { style ->
+                            grainDraft = grainDraft.selectStyle(style, viewModel.state.value.photoGrainIntensities)
+                        },
+                        onIntensityChanged = { style, intensity ->
+                            val next = grainDraft.changeIntensity(style, intensity)
+                            if (next != grainDraft) {
+                                grainDraft = next
+                                viewModel.rememberPhotoGrainIntensity(next.style, next.intensityPercent)
+                            }
+                        },
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
                 }
                 PhotoFrameWatermarkEditor(
                     showFrame = visibleModules.showsPhotoEffect(PhotoEffectModule.FRAME),
@@ -1216,7 +1297,7 @@ fun SettingsOverlay(
                 ?.takeIf { state.photoFilterEnabled }
                 ?.let {
                     listOf(
-                        photoFilterDisplayName(it),
+                        photoEffectFilterDisplayName(it),
                         stringResource(
                             R.string.photo_filter_intensity_summary,
                             state.photoFilterIntensityPercent,
@@ -1237,8 +1318,14 @@ fun SettingsOverlay(
                 filterDraftId = state.selectedPhotoFilterId
                     ?: state.photoFilters.firstOrNull()?.id
                 filterDraftIntensity = state.photoFilterIntensityPercent
+                filterDraftAdjustments = state.photoFilterAdjustments
                 filterDraftEnabled = state.photoFilterEnabled
+                grainDraft = state.photoGrain.normalized()
                 photoLutDraft.reset(state.photoLut, photoLutDraft.store.uri("transfer"))
+                photoNp3Draft.resetSelection(
+                    state.photoFilters.firstOrNull { it.id == filterDraftId },
+                    photoNp3Draft.store.uri("transfer"),
+                )
                 frameDraftDecorationEnabled = state.photoFrameEnabled
                 // 编辑草稿使用各子项的配置，不受照片效果总开关影响。
                 frameDraftBorderEnabled = state.photoFrameEnabled && state.photoFrameBorderEnabled
@@ -1252,7 +1339,7 @@ fun SettingsOverlay(
             }
             SettingsCard(
                 borderColor = colors.accentOrange.copy(
-                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoLut != null || state.photoFrameEnabled)) 0.56f
+                    alpha = if (state.photoEffectsEnabled && (state.photoFilterEnabled || state.photoLut != null || state.photoFrameEnabled || state.photoGrain.isEnabled)) 0.56f
                     else 0.30f
                 ),
                 pressAccentColor = colors.accentOrange,
@@ -1288,7 +1375,10 @@ fun SettingsOverlay(
                 ) {
                     PhotoEffectSummaryItem(
                         label = if (state.photoLut != null) "LUT" else stringResource(R.string.photo_filter),
-                        valueLines = filterSummaryLines,
+                        valueLines = if (state.photoGrain.isEnabled) filterSummaryLines +
+                            stringResource(R.string.photo_grain_intensity_summary,
+                                photoGrainStyleLabel(state.photoGrain.style), state.photoGrain.normalized().intensityPercent)
+                        else filterSummaryLines,
                         accentColor = if (state.photoLut != null)
                             androidx.compose.ui.graphics.lerp(colors.statusConnected, colors.accentBlue, .35f)
                         else colors.accentBlue,
@@ -1548,6 +1638,7 @@ internal fun PhotoEffectsInfoBubble(
             settingsHelpItem(R.string.photo_effect_module_filter, R.string.photo_effects_help_filters),
             settingsHelpItem(R.string.lut_folder, R.string.photo_lut_help),
             settingsHelpItem(R.string.photo_lut_settings, R.string.photo_effects_help_lut_settings),
+            settingsHelpItem(R.string.photo_grain, R.string.photo_grain_hint),
         )),
         TipBubbleSection(stringResource(R.string.photo_effects_help_decoration), listOf(
             settingsHelpItem(R.string.photo_frame_style_short, R.string.photo_effects_help_frame),
@@ -1661,189 +1752,6 @@ private fun PhotoEffectSummaryItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun PhotoFilterEditor(
-    filters: List<PhotoFilterPreset>,
-    favoriteFilters: List<FavoritePhotoFilter>,
-    rememberedIntensities: Map<String, Int>,
-    selectedId: String?,
-    enabled: Boolean,
-    intensityPercent: Int,
-    onDisabled: () -> Unit,
-    onSelected: (String) -> Unit,
-    onIntensityChanged: (String, Int) -> Unit,
-    onFavoriteToggled: (String) -> Unit,
-    hapticsEnabled: Boolean,
-) {
-    val colors = AppTheme.colors
-    val filterAccent = colors.accentBlue
-    val favoritePalette = rememberPhotoEffectFavoriteButtonPalette()
-    val haptics = rememberHaptics(hapticsEnabled)
-    var showFullChooser by rememberSaveable { mutableStateOf(false) }
-    var chooserCategory by rememberSaveable { mutableStateOf(PhotoFilterCategory.ALL.name) }
-    val selected = filters.firstOrNull { it.id == selectedId }
-    val normalizedIntensity = normalizePhotoFilterIntensity(intensityPercent)
-    val intensityChoices = remember { (100 downTo 2 step 2).toList() }
-    val favoriteByCatalogKey = favoriteFilters.associateBy { it.catalogKey }
-    val orderedFilters = orderWithFavorites(
-        items = filters,
-        favoriteKeys = favoriteFilters.map { it.catalogKey },
-        keyOf = { filter -> BuiltInPhotoFilters.catalogKey(filter.id) ?: filter.id },
-    )
-    val offLabel = stringResource(R.string.photo_filter_off_option)
-    val filterLabelsById = orderedFilters.associate { filter ->
-        filter.id to photoFilterDisplayName(filter)
-    }
-    val filterOptionIds: List<String?> = listOf(null) + orderedFilters.map { it.id }
-    val selectedOptionId = selectedId?.takeIf { enabled && it in filterLabelsById }
-    fun rememberedIntensity(filterId: String): Int {
-        val catalogKey = BuiltInPhotoFilters.catalogKey(filterId)
-        return catalogKey?.let(rememberedIntensities::get)
-            ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
-    }
-    SettingsCard(
-        borderColor = filterAccent.copy(alpha = 0.24f),
-        tintColor = filterAccent,
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ReleaseCommitWheel(
-                options = filterOptionIds,
-                selected = selectedOptionId,
-                optionLabel = { filterId ->
-                    if (filterId == null) {
-                        offLabel
-                    } else {
-                        filterLabelsById[filterId].orEmpty()
-                    }
-                },
-                favoriteOption = { filterId ->
-                    filterId != null && BuiltInPhotoFilters.catalogKey(filterId)
-                        ?.let(favoriteByCatalogKey::containsKey) == true
-                },
-                favoriteIconColor = favoritePalette.activeIcon,
-                onValueCommitted = { filterId ->
-                    if (filterId == null) {
-                        onDisabled()
-                    } else {
-                        onSelected(filterId)
-                        onIntensityChanged(filterId, rememberedIntensity(filterId))
-                    }
-                },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.photo_filter),
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_COLOR_NAME_WEIGHT),
-                onLongClick = { showFullChooser = true },
-            )
-            ReleaseCommitWheel(
-                options = intensityChoices,
-                selected = normalizedIntensity,
-                optionLabel = { "$it%" },
-                onValueCommitted = { intensity ->
-                    selected?.takeIf { enabled }?.let { preset ->
-                        onIntensityChanged(preset.id, intensity)
-                    }
-                },
-                onDetent = haptics::tick,
-                label = stringResource(R.string.photo_filter_intensity),
-                enabled = enabled && selected != null,
-                wheelHeight = PHOTO_EFFECTS_CONTROL_HEIGHT,
-                accentColor = filterAccent,
-                modifier = Modifier.weight(PHOTO_COLOR_INTENSITY_WEIGHT),
-            )
-            FavoriteToggleButton(
-                favorite = selected?.let { preset ->
-                    BuiltInPhotoFilters.catalogKey(preset.id)
-                        ?.let(favoriteByCatalogKey::containsKey)
-                } == true && enabled,
-                enabled = enabled && selected != null,
-                onClick = {
-                    selected?.let { preset ->
-                        haptics.tick()
-                        onFavoriteToggled(preset.id)
-                    }
-                },
-            )
-        }
-    }
-    if (showFullChooser) {
-        val category = PhotoFilterCategory.entries.firstOrNull { it.name == chooserCategory }
-            ?: PhotoFilterCategory.ALL
-        val favoriteKeys = favoriteFilters.map { it.catalogKey }
-        val chooserFilters = filters.orderForCategory(category, favoriteKeys) {
-            BuiltInPhotoFilters.catalogKey(it.id) ?: it.id
-        }
-        val dialogMaxHeight = (LocalConfiguration.current.screenHeightDp - 120).coerceIn(120, 440).dp
-        Dialog(onDismissRequest = { showFullChooser = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-            Surface(
-                modifier = Modifier.padding(horizontal = 24.dp).width(320.dp),
-                shape = RoundedCornerShape(18.dp),
-                color = colors.glassSurface.copy(alpha = .92f),
-                border = BorderStroke(1.dp, colors.glassPanelBorder),
-                shadowElevation = 6.dp,
-            ) {
-                Column(Modifier.padding(10.dp).heightIn(max = dialogMaxHeight)) {
-                    LutChooserHeader(off = !enabled,
-                        offLabel = stringResource(R.string.photo_filter_turn_off),
-                        onOff = { haptics.tick(); onDisabled(); showFullChooser = false })
-                    Row(Modifier.weight(1f, fill = false).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.36f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            items(PhotoFilterCategory.entries.size) { index ->
-                                val item = PhotoFilterCategory.entries[index]
-                                Surface(onClick = { chooserCategory = item.name },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = if (item == category) filterAccent.copy(alpha = .14f) else Color.Transparent,
-                                    modifier = Modifier.fillMaxWidth()) {
-                                    Text(item.title, style = MaterialTheme.typography.labelLarge,
-                                        color = if (item == category) filterAccent else colors.onSurfaceVariant,
-                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 10.dp))
-                                }
-                            }
-                        }
-                        key(category) {
-                            val scroll = androidx.compose.foundation.lazy.rememberLazyListState(
-                                initialFirstVisibleItemIndex = chooserFilters.indexOfFirst {
-                                    enabled && it.id == selectedId
-                                }.coerceAtLeast(0))
-                            androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(.64f), state = scroll,
-                                verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                items(chooserFilters.size, key = { chooserFilters[it].id }) { index ->
-                                    val preset = chooserFilters[index]
-                                    val isSelected = enabled && preset.id == selectedId
-                                    val isFavorite = BuiltInPhotoFilters.catalogKey(preset.id) in favoriteKeys
-                                    Surface(onClick = {
-                                        haptics.tick()
-                                        onSelected(preset.id)
-                                        onIntensityChanged(preset.id, rememberedIntensity(preset.id))
-                                        showFullChooser = false
-                                    }, shape = RoundedCornerShape(8.dp),
-                                        color = if (isSelected) filterAccent.copy(alpha = .18f) else Color.Transparent,
-                                        modifier = Modifier.fillMaxWidth()) {
-                                        Text(photoFilterDisplayName(preset),
-                                            color = when {
-                                                isFavorite -> colors.accentYellow
-                                                isSelected -> filterAccent
-                                                else -> colors.onBackground
-                                            }, style = MaterialTheme.typography.labelLarge,
-                                            maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 internal fun nextPhotoFilterSelections(
     filters: List<PhotoFilterPreset>,
     favoriteCatalogKeys: List<String>,
@@ -1851,12 +1759,13 @@ internal fun nextPhotoFilterSelections(
     selectedId: String?,
     enabled: Boolean,
     count: Int = PHOTO_EFFECTS_FORWARD_PREFETCH_COUNT,
+    rememberedAdjustments: Map<String, LutAdjustments> = emptyMap(),
 ): List<PhotoFilterSelection> {
     if (!enabled || selectedId == null || count <= 0) return emptyList()
     val ordered = orderWithFavorites(
         items = filters,
         favoriteKeys = favoriteCatalogKeys,
-        keyOf = { filter -> BuiltInPhotoFilters.catalogKey(filter.id) ?: filter.id },
+        keyOf = { filter -> photoFilterCatalogKey(filter.id) ?: filter.id },
     )
     val selectedIndex = ordered.indexOfFirst { it.id == selectedId }
     if (selectedIndex < 0 || selectedIndex == ordered.lastIndex) return emptyList()
@@ -1864,11 +1773,12 @@ internal fun nextPhotoFilterSelections(
         .drop(selectedIndex + 1)
         .take(count)
         .map { preset ->
-            val catalogKey = BuiltInPhotoFilters.catalogKey(preset.id) ?: preset.id
+            val catalogKey = photoFilterCatalogKey(preset.id) ?: preset.id
             PhotoFilterSelection(
                 preset = preset,
                 intensityPercent = rememberedIntensities[catalogKey]
                     ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT,
+                lutAdjustments = photoFilterAdjustmentsFor(preset.id, rememberedAdjustments),
             )
         }
         .toList()
@@ -1919,6 +1829,7 @@ internal fun FavoriteToggleButton(
     description: String? = null,
     compact: Boolean = false,
     compactSize: Dp = 28.dp,
+    readOnly: Boolean = false,
 ) {
     val palette = rememberPhotoEffectFavoriteButtonPalette()
     val markColor by animateColorAsState(
@@ -1928,7 +1839,8 @@ internal fun FavoriteToggleButton(
     )
     GlassButton(
         onClick = onClick,
-        enabled = enabled,
+        enabled = enabled && !readOnly,
+        disabledAlpha = if (enabled) 1f else 0.45f,
         active = favorite,
         activeColor = palette.activeMaterial,
         activeOutline = true,
@@ -1961,7 +1873,7 @@ internal fun FavoriteToggleButton(
 }
 
 @Composable
-private fun rememberPhotoEffectFavoriteButtonPalette(): PhotoEffectFavoriteButtonPalette {
+internal fun rememberPhotoEffectFavoriteButtonPalette(): PhotoEffectFavoriteButtonPalette {
     val colors = AppTheme.colors
     val buttonSkin = LocalButtonTexturePalette.current?.skin ?: SkinPreset.FROSTED_GLASS
     val buttonDark = colors.background.luminance() < 0.5f
@@ -2020,7 +1932,7 @@ private fun FittedRotatingBitmap(
 }
 
 @Composable
-private fun photoFilterDisplayName(filter: PhotoFilterPreset): String =
+internal fun photoEffectFilterDisplayName(filter: PhotoFilterPreset): String =
     BuiltInPhotoFilters.nameResId(filter.id)?.let { stringResource(it) } ?: filter.name
 
 @Composable
@@ -2667,7 +2579,7 @@ private fun PhotoFrameMetadataInlineSettings(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ReleaseCommitWheel(
-                    options = remember { (MIN_PHOTO_FRAME_WIDTH_PERCENT..MAX_PHOTO_FRAME_WIDTH_PERCENT step PHOTO_FRAME_WIDTH_STEP).toList() },
+                    options = remember { (MAX_PHOTO_FRAME_WIDTH_PERCENT downTo MIN_PHOTO_FRAME_WIDTH_PERCENT step PHOTO_FRAME_WIDTH_STEP).toList() },
                     selected = settings.widthPercent,
                     optionLabel = { "$it%" },
                     onValueCommitted = { onSettingsChanged(settings.copy(widthPercent = it)) },
@@ -2688,7 +2600,7 @@ private fun PhotoFrameMetadataInlineSettings(
                     // Switching presets discards any unfinished gesture belonging to the old settings.
                     key(preset) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val levels = remember { (0..200 step 10).toList() }
+                            val levels = remember { (200 downTo 0 step 10).toList() }
                             ReleaseCommitWheel(options = levels, selected = settings.backgroundBlurPercent,
                                 optionLabel = { "$it%" }, label = stringResource(R.string.photo_frame_background_blur),
                                 onValueCommitted = { onSettingsChanged(settings.copy(backgroundBlurPercent = it)) },
@@ -2998,8 +2910,9 @@ private fun PhotoEffectsPreviewLoadingPlaceholder() {
 @Composable
 internal fun PhotoEffectsRenderedPreview(
     source: Bitmap,
+    sourceName: String = "",
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     resetOnSourceChange: Boolean = false,
-    showSourceWhileRendering: Boolean = false,
     metadata: PhotoFrameMetadata = EMPTY_PHOTO_EFFECTS_PREVIEW_METADATA,
     sourceRotationQuarterTurns: Int,
     requestedRotationQuarterTurns: Int,
@@ -3014,7 +2927,7 @@ internal fun PhotoEffectsRenderedPreview(
     prefetchFilters: List<PhotoFilterSelection> = emptyList(),
     onOpen: ((Bitmap, Rect, () -> Bitmap?) -> Unit)?,
 ) {
-    val longPressFeedback = com.ztransfer.ui.util.rememberLongPressFeedback()
+    val comparisonHaptics = rememberHaptics(LocalHapticsEnabled.current)
     val colors = AppTheme.colors
     val context = LocalContext.current
     val placeLookupAllowed by remember(context) {
@@ -3022,7 +2935,7 @@ internal fun PhotoEffectsRenderedPreview(
     }.collectAsState(initial = false)
 
     // 相机缩略图升级为 FHD 时保留旧效果帧；本地工作台换照片则按源重置，避免串图。
-    // 原有入口等待首张成片；从 FHD 大图直接进入时可沿用原图，避免空白。
+    // 所有入口都等待完整成片，不能先显示未经处理的 FHD，再跳成当前效果。
     val sourceRenderIdentity: Any = if (resetOnSourceChange) source else Unit
     val rendered = remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
@@ -3030,12 +2943,19 @@ internal fun PhotoEffectsRenderedPreview(
     var previewFailed by remember(sourceRenderIdentity) { mutableStateOf(false) }
     var previewBounds by remember { mutableStateOf<Rect?>(null) }
     var showUnfiltered by remember(source) { mutableStateOf(false) }
-    val requestedFrameLayout = remember(borderEnabled, preset) {
-        PhotoEffectsPreviewFrameLayout(
-            preset = preset.takeIf { borderEnabled },
+    val requestedFrameLayout = remember(borderEnabled, preset, metadataSettings, watermark) {
+        PhotoEffectsPreviewFrameLayout.from(
+            borderEnabled = borderEnabled,
+            preset = preset,
+            metadataSettings = metadataSettings,
+            watermark = watermark,
         )
     }
+    val normalizedGrain = grain.normalized()
+    val grainSeed = remember(sourceName) { photoGrainSeed(sourceName) }
+    val hasColorEffects = filter != null || normalizedGrain.isEnabled
     val currentFilterKey = PhotoEffectsPreviewCacheKey.from(filter)
+    val currentRenderKey = PhotoEffectsPreviewCacheKey.from(filter, normalizedGrain, grainSeed)
     val previewCaches = remember(
         source,
         metadata,
@@ -3058,12 +2978,12 @@ internal fun PhotoEffectsRenderedPreview(
     DisposableEffect(previewCaches) {
         onDispose { previewCaches.close() }
     }
-    val currentPreviewCache = remember(previewCaches, currentFilterKey) {
-        previewCaches.getOrCreate(currentFilterKey)
+    val currentPreviewCache = remember(previewCaches, currentRenderKey) {
+        previewCaches.getOrCreate(currentRenderKey)
     }
     val previewDemand = remember(previewCaches) { PhotoEffectsPreviewDemand() }
-    // 对比图不含滤镜，切换滤镜时仍然有效；与主成片分开缓存，避免重复合成相同底图。
-    val comparisonCache = if (filter == null) {
+    // 对比图不含滤镜和颗粒，保留相同边框水印；调节颜色效果时不重复合成。
+    val comparisonCache = if (!hasColorEffects) {
         null
     } else remember(
         source,
@@ -3099,34 +3019,37 @@ internal fun PhotoEffectsRenderedPreview(
     suspend fun renderPreview(
         selection: PhotoFilterSelection?,
         useCurrentFilteredSource: Boolean,
+        includeGrain: Boolean = true,
     ): Bitmap {
-        val selectionKey = PhotoEffectsPreviewCacheKey.from(selection)
-        val outputCache = if (selection == null && filter != null) {
+        val appliedGrain = if (includeGrain) normalizedGrain else PhotoGrainSettings.OFF
+        val selectionKey = PhotoEffectsPreviewCacheKey.from(selection, appliedGrain, grainSeed)
+        val isComparison = !includeGrain && selection == null && hasColorEffects
+        val outputCache = if (isComparison) {
             checkNotNull(comparisonCache)
         } else {
             previewCaches.getOrCreate(selectionKey)
         }
         return outputCache.getOrRender(
-            isObsolete = {
-                selection != null && !previewDemand.isRequested(selectionKey)
-            },
+            isObsolete = { !isComparison && !previewDemand.isRequested(selectionKey) },
         ) { isCancelled ->
-            // Keep filtering inside the completed-frame cache. A recent full-preview hit must not
-            // rebuild an intermediate filtered bitmap before discovering that output already exists.
+            // Current filter input is cached independently of grain/frame/watermark. The exporter
+            // applies grain only to photo pixels, retaining a clean backdrop and color palette.
             val input = if (useCurrentFilteredSource) {
                 filteredSource(selection)
             } else {
-                selection?.let {
-                    PhotoFilterRenderer.render(source, it, isCancelled)
-                } ?: source
+                selection?.let { PhotoFilterRenderer.render(source, it, isCancelled) } ?: source
             }
             var output: Bitmap? = null
             try {
+                if (isCancelled()) throw CancellationException("Preview render superseded")
                 output = PhotoFrameExporter.renderPreview(
                     context = context,
                     source = input,
                     metadata = if (borderEnabled) com.ztransfer.frame.PhotoFrameLocationResolver.resolve(
                         context, metadata, metadataSettings,
+                        trace = if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) { detail ->
+                            com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(sourceName, "preview", detail)
+                        } else null,
                     ) else metadata,
                     preset = preset,
                     watermark = watermark,
@@ -3135,31 +3058,31 @@ internal fun PhotoEffectsRenderedPreview(
                     longEdge = PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE,
                     filter = null,
                     previewPlaceholders = previewPlaceholders,
+                    grain = appliedGrain,
+                    grainSeed = grainSeed,
+                    backdropSource = source,
+                    isCancelled = isCancelled,
                 )
                 checkNotNull(output)
             } finally {
-                // Prefetch intermediates are never displayed or retained. The selected filter's
-                // intermediate keeps its existing cache so border/watermark edits do not refilter.
-                // With no frame/watermark the exporter may return input itself; ownership then
-                // transfers to the completed-preview cache and it must remain alive.
-                if (
-                    shouldRecyclePrefetchInput(
-                        useCurrentFilteredSource = useCurrentFilteredSource,
-                        inputIsSource = input === source,
-                        outputIsInput = output === input,
-                    )
-                ) {
-                    input.recycle()
-                }
+                // Current/cache/displayed inputs stay alive. Only an unretained prefetch bitmap
+                // belongs to this operation; output may itself alias that input when effects are off.
+                if (shouldRecyclePrefetchInput(
+                    useCurrentFilteredSource = useCurrentFilteredSource,
+                    inputIsSource = input === source,
+                    outputIsInput = output === input,
+                )) input.recycle()
             }
         }
     }
 
-    LaunchedEffect(currentPreviewCache, filter, prefetchFilters) {
+    LaunchedEffect(currentPreviewCache, filter, normalizedGrain, grainSeed, prefetchFilters) {
         previewDemand.replaceRequested(
             buildSet {
-                add(currentFilterKey)
-                prefetchFilters.forEach { add(PhotoEffectsPreviewCacheKey.from(it)) }
+                add(currentRenderKey)
+                prefetchFilters.forEach {
+                    add(PhotoEffectsPreviewCacheKey.from(it, normalizedGrain, grainSeed))
+                }
             },
         )
         try {
@@ -3178,6 +3101,12 @@ internal fun PhotoEffectsRenderedPreview(
             // duration in front of the existing long-press comparison work.
             val prefetchJob = launch {
                 try {
+                    // Grain adjustments invalidate all neighbor outputs. Wait briefly so another
+                    // wheel commit cancels this work before refiltering two unrelated presets.
+                    // The selected preview is already visible; grain-off prefetch stays unchanged.
+                    if (normalizedGrain.isEnabled && prefetchFilters.isNotEmpty()) {
+                        delay(PHOTO_GRAIN_PREFETCH_DELAY_MS)
+                    }
                     prefetchFilters.forEach { nextFilter ->
                         ensureActive()
                         renderPreview(nextFilter, useCurrentFilteredSource = false)
@@ -3191,13 +3120,13 @@ internal fun PhotoEffectsRenderedPreview(
                 }
             }
 
-            // 对比图只跳过滤镜，继续使用完全相同的边框、水印、尺寸和元数据。
-            // 无滤镜基线同样进入缓存，所有滤镜共用，不再为每次长按重复渲染。
-            if (filter != null) {
+            // 对比图跳过滤镜与颗粒，继续使用相同边框、水印、尺寸和元数据。
+            // 仅启用颗粒时也能长按对比；无效果的基线由所有颜色调整共用。
+            if (hasColorEffects) {
                 try {
                     // 主预览优先显示；继续调参时该延时会被取消，旧对比图不会抢占下一次渲染。
                     delay(PHOTO_EFFECTS_COMPARISON_DELAY_MS)
-                    val comparison = renderPreview(null, useCurrentFilteredSource = false)
+                    val comparison = renderPreview(null, useCurrentFilteredSource = false, includeGrain = false)
                     ensureActive()
                     rendered.value = RenderedPhotoEffectsPreview(
                         bitmap = output,
@@ -3237,7 +3166,7 @@ internal fun PhotoEffectsRenderedPreview(
         animationSpec = Motion.overlayExpand,
         label = "photoFramePreviewAspectRatio",
     )
-    // 默认首张效果帧就绪前保持图片区为空；FHD 直接进入时可沿用原图。
+    // 首张完整效果帧就绪前显示加载状态；后续调参继续保留上一张完整成片。
     // 本地工作台按新照片重置，相机的高清源升级不重置。
     val replacementVisibility = remember(sourceRenderIdentity) { Animatable(1f) }
     var visibleFrame by remember(sourceRenderIdentity) {
@@ -3246,11 +3175,8 @@ internal fun PhotoEffectsRenderedPreview(
     var outgoingFrame by remember(sourceRenderIdentity) {
         mutableStateOf<RenderedPhotoEffectsPreview?>(null)
     }
-    var initialSourceVisible by remember(sourceRenderIdentity) {
-        mutableStateOf(showSourceWhileRendering)
-    }
     val frameTransition = remember(sourceRenderIdentity) {
-        Animatable(if (showSourceWhileRendering) 0f else 1f)
+        Animatable(0f)
     }
     val previewForGesture = visibleFrame
     val boundsForGesture = previewBounds
@@ -3278,17 +3204,12 @@ internal fun PhotoEffectsRenderedPreview(
                 PhotoEffectsPreviewChange.INITIAL -> {
                     visibleFrame = next
                     outgoingFrame = null
-                    if (initialSourceVisible) {
-                        frameTransition.snapTo(0f)
-                        withFrameNanos { }
-                        frameTransition.animateTo(
-                            1f,
-                            tween(durationMillis = 220, easing = FastOutSlowInEasing),
-                        )
-                        initialSourceVisible = false
-                    } else {
-                        frameTransition.snapTo(1f)
-                    }
+                    frameTransition.snapTo(0f)
+                    withFrameNanos { }
+                    frameTransition.animateTo(
+                        1f,
+                        tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    )
                 }
                 PhotoEffectsPreviewChange.UPDATE -> {
                     // 对比图只补齐数据，不打断渐入或再播放一次动画。
@@ -3342,13 +3263,12 @@ internal fun PhotoEffectsRenderedPreview(
                 // 横图和竖图各用稳定视口；边框成片在内部 Fit，完整呈现对应方向的留白与铭牌。
                 .aspectRatio(viewportAspectRatio)
                 .onGloballyPositioned { previewBounds = it.boundsInRoot() }
-                .pointerInput(previewForGesture, boundsForGesture, longPressFeedback, onRotate != null) {
+                .pointerInput(previewForGesture, boundsForGesture, onRotate != null, comparisonHaptics) {
                     if (previewForGesture == null || boundsForGesture == null) return@pointerInput
                     detectTapGestures(
                         onPress = {
                             try {
-                                if (previewForGesture.unfilteredBitmap != null) longPressFeedback.trackPress(this)
-                                else tryAwaitRelease()
+                                tryAwaitRelease()
                             } finally {
                                 showUnfiltered = false
                             }
@@ -3362,18 +3282,26 @@ internal fun PhotoEffectsRenderedPreview(
                         onDoubleTap = if (onRotate != null) ({ latestOnRotate?.invoke() }) else null,
                         onLongPress = {
                             if (previewForGesture.unfilteredBitmap != null) {
-                                longPressFeedback.trigger { showUnfiltered = true }
+                                showUnfiltered = true
+                                comparisonHaptics.longPress()
                             }
                         },
                     )
                 },
         ) {
-            if (initialSourceVisible || (visibleFrame == null && (showSourceWhileRendering || previewFailed))) {
+            if (visibleFrame == null && previewFailed) {
                 FittedRotatingBitmap(
                     image = sourceImage,
                     rotationDegrees = 0f,
-                    description = if (visibleFrame == null) stringResource(R.string.photo_frame_preview) else null,
+                    description = stringResource(R.string.photo_frame_preview),
                     modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (visibleFrame == null && !previewFailed) {
+                CircularProgressIndicator(
+                    color = colors.accentBlue.copy(alpha = 0.76f),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(22.dp),
                 )
             }
             visibleFrame?.let { frame ->
@@ -3390,8 +3318,7 @@ internal fun PhotoEffectsRenderedPreview(
                 PhotoEffectsPreviewLayer(
                     frame = frame,
                     showUnfiltered = showUnfiltered,
-                    alpha = replacementVisibility.value *
-                        if (outgoingFrame == null && !initialSourceVisible) 1f else frameTransition.value,
+                    alpha = replacementVisibility.value * frameTransition.value,
                     description = stringResource(R.string.photo_frame_preview),
                 )
             }
@@ -3449,6 +3376,7 @@ private const val PHOTO_EFFECTS_PREVIEW_RENDER_LONG_EDGE = 1_920
 private const val PHOTO_EFFECTS_RECENT_PREVIEW_CACHE_SIZE = 3
 private const val PHOTO_EFFECTS_FORWARD_PREFETCH_COUNT = 2
 private const val PHOTO_EFFECTS_COMPARISON_DELAY_MS = 500L
+private const val PHOTO_GRAIN_PREFETCH_DELAY_MS = 600L
 private const val PHOTO_EFFECTS_TEXT_PREVIEW_DELAY_MS = 140L
 private const val PHOTO_EFFECTS_FALLBACK_GRACE_MS = 2_200L
 // 边框合成无法在 Canvas 绘制途中取消；全局串行可防止旧 FHD 成片并发拖慢最新预览。
@@ -3519,22 +3447,47 @@ internal suspend fun <T> Flow<T>.collectPhotoEffectsPreviewTransitions(transitio
     conflate().collect { transition(it) }
 }
 
-/** 只有真正改变输出画布的边框样式才走完整淡出淡入；无边框时忽略保留的预设草稿。 */
-private data class PhotoEffectsPreviewFrameLayout(
+/**
+ * Removing/restoring the information band changes the canvas even within one preset. Never
+ * crossfade those two fitted images: the old band's uncovered strip would linger underneath.
+ * Other parameter changes retain their usual transition; hidden border drafts are ignored.
+ */
+internal data class PhotoEffectsPreviewFrameLayout(
     val preset: PhotoFramePreset?,
-)
+    val uniformBorder: Boolean,
+) {
+    companion object {
+        fun from(
+            borderEnabled: Boolean,
+            preset: PhotoFramePreset,
+            metadataSettings: PhotoFrameMetadataSettings,
+            watermark: PhotoFrameWatermark,
+        ): PhotoEffectsPreviewFrameLayout = PhotoEffectsPreviewFrameLayout(
+            preset = preset.takeIf { borderEnabled },
+            uniformBorder = borderEnabled && usesUniformPhotoFrameBorder(preset, metadataSettings, watermark),
+        )
+    }
+}
 
-private data class PhotoEffectsPreviewCacheKey(
+internal data class PhotoEffectsPreviewCacheKey(
     val filterId: String?,
     val intensityPercent: Int,
     val contrast: Int,
     val saturation: Int,
     val highlights: Int,
     val shadows: Int,
+    val grainIntensityPercent: Int = 0,
+    val grainSeed: Int = 0,
+    val grainStyle: PhotoGrainStyle? = null,
 ) {
     companion object {
-        fun from(selection: PhotoFilterSelection?): PhotoEffectsPreviewCacheKey =
-            selection?.let {
+        fun from(
+            selection: PhotoFilterSelection?,
+            grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+            seed: Int = 0,
+        ): PhotoEffectsPreviewCacheKey {
+            val normalizedGrain = grain.normalized()
+            val filterKey = selection?.let {
                 PhotoEffectsPreviewCacheKey(
                     filterId = it.preset.id,
                     intensityPercent = it.normalizedIntensityPercent,
@@ -3544,6 +3497,12 @@ private data class PhotoEffectsPreviewCacheKey(
                     shadows = it.lutAdjustments.shadows,
                 )
             } ?: PhotoEffectsPreviewCacheKey(null, 0, 0, 0, 0, 0)
+            return filterKey.copy(
+                grainIntensityPercent = if (normalizedGrain.isEnabled) normalizedGrain.intensityPercent else 0,
+                grainSeed = if (normalizedGrain.isEnabled) seed else 0,
+                grainStyle = normalizedGrain.style.takeIf { normalizedGrain.isEnabled },
+            )
+        }
     }
 }
 
@@ -3895,6 +3854,8 @@ private val GPS_PANEL_SHAPE = RoundedCornerShape(24.dp)
 // On the target layout the left connection column is about 155dp wide; 250dp keeps the
 // expanded detail panel close to the golden-ratio proportion without returning to the old width.
 private val GPS_DETAIL_PANEL_WIDTH = 250.dp
+// Only widen this panel's animation inlet; other genie popups retain their logo-sized opening.
+private val GPS_DETAIL_ANIMATION_MOUTH_WIDTH = 80.dp
 private val GPS_PLACE_BUBBLE_SHAPE = RoundedCornerShape(20.dp)
 private val GPS_DETAIL_ITEM_SHAPE = RoundedCornerShape(16.dp)
 private val GPS_ACTION_BUTTON_SHAPE = RoundedCornerShape(14.dp)
@@ -3917,23 +3878,14 @@ private fun rememberGpsEntryAmbientAlpha(
         active -> 0.105f
         else -> 0.070f
     }
-    return if (breathing) {
-        val transition = rememberInfiniteTransition(label = "gpsEntryBreathing")
-        transition.animateFloat(
-            initialValue = if (active) 0.075f else 0.050f,
-            targetValue = if (active) 0.160f else 0.145f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(
-                    durationMillis = if (active) 2_400 else 2_800,
-                    easing = FastOutSlowInEasing,
-                ),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "gpsEntryFillAlpha",
-        )
-    } else {
-        rememberUpdatedState(restingAlpha)
-    }
+    return rememberAmbientBreathingAlpha(
+        breathing = breathing,
+        restingAlpha = restingAlpha,
+        minAlpha = if (active) 0.075f else 0.050f,
+        maxAlpha = if (active) 0.160f else 0.145f,
+        durationMillis = if (active) 2_400 else 2_800,
+        label = "gpsEntryBreathing",
+    )
 }
 
 @Composable
@@ -4265,8 +4217,13 @@ internal fun GpsConnectionControl(
             },
         )
         GpsDetailOverflowLayer(modifier = Modifier.fillMaxWidth()) {
-            GenieInlinePanel(detailVisibility,anchor={detailAnchor},
-                modifier=Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH).padding(top=6.dp)) {
+            GenieInlinePanel(
+                detailVisibility,
+                anchor = { detailAnchor },
+                modifier = Modifier.requiredWidth(GPS_DETAIL_PANEL_WIDTH).padding(top = 6.dp),
+                mouthWidth = GPS_DETAIL_ANIMATION_MOUTH_WIDTH,
+                tiltEnabled = false,
+            ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth(),
@@ -4430,7 +4387,7 @@ internal fun GpsConnectionControl(
                         contentAlignment = Alignment.Center,
                         label = "gpsLeadingControl",
                         modifier = Modifier
-                            .weight(0.82f)
+                            .weight(if (gpsState.enabled) 0.82f else 0.60f)
                             .height(COMPACT_SETTINGS_WHEEL_HEIGHT),
                     ) { controlMode ->
                         when (controlMode) {
@@ -4466,13 +4423,16 @@ internal fun GpsConnectionControl(
                     GpsUpdateFrequencyWheel(
                         selected = gpsUpdateFrequency,
                         onValueCommitted = gpsViewModel::setUpdateFrequency,
+                        onDetent = haptics::tick,
+                        onSyncNow = gpsViewModel::syncNow,
+                        canSyncNow = gpsState.canSyncNow,
                         enabled = gpsConfigurationEnabled,
                         emphasized = !gpsConfigurationEnabled,
                         showFrequency = !gpsState.enabled,
                         showCountdown = timingControlsVisible,
                         lastUpdatedAtMs = gpsState.lastSentAtMs,
                         status = gpsState.status,
-                        modifier = Modifier.weight(0.86f),
+                        modifier = Modifier.weight(if (gpsState.enabled) 0.86f else 1.08f),
                     )
                     GpsStatusButton(
                         status = gpsState.status,
@@ -4930,6 +4890,9 @@ private fun GpsLastUpdatedWheel(
 private fun GpsUpdateFrequencyWheel(
     selected: GpsUpdateFrequency,
     onValueCommitted: (GpsUpdateFrequency) -> Unit,
+    onDetent: () -> Unit,
+    onSyncNow: () -> Unit,
+    canSyncNow: Boolean,
     emphasized: Boolean,
     showFrequency: Boolean,
     showCountdown: Boolean,
@@ -5003,11 +4966,13 @@ private fun GpsUpdateFrequencyWheel(
                 remainingSeconds == null -> "--:--"
                 else -> gpsCountdownText(remainingSeconds)
             }
+            val syncNowLabel = stringResource(R.string.gps_sync_now)
             ReleaseCommitWheel(
                 options = listOf(countdownText),
                 selected = countdownText,
                 optionLabel = { it },
                 onValueCommitted = {},
+                onActivated = onSyncNow,
                 label = null,
                 wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                 cornerRadius = 14.dp,
@@ -5016,10 +4981,13 @@ private fun GpsUpdateFrequencyWheel(
                 showDragHint = false,
                 accentColor = colors.statusConnected,
                 enabled = true,
-                readOnly = true,
+                readOnly = !canSyncNow || !showCountdown,
                 emphasized = true,
                 burstProgress = updateBurst.value,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().semantics {
+                    role = Role.Button
+                    contentDescription = syncNowLabel
+                },
             )
             }
             GpsUpdateControlMode.FREQUENCY -> {
@@ -5028,12 +4996,13 @@ private fun GpsUpdateFrequencyWheel(
                     selected = selected,
                     optionLabel = { frequency -> frequencyLabels.getValue(frequency) },
                     onValueCommitted = onValueCommitted,
+                    onDetent = onDetent,
                     label = stringResource(R.string.gps_update_frequency_label),
                     wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                     cornerRadius = 14.dp,
                     optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
                     optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
-                    showDragHint = false,
+                    showDragHint = true,
                     accentColor = colors.accentBlue,
                     enabled = enabled,
                     emphasized = emphasized,

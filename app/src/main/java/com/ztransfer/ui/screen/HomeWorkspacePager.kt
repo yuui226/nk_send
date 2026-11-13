@@ -272,6 +272,7 @@ fun HomeWorkspacePager(
                 LocalPhotoEffectsPage(
                     viewModel = transferViewModel,
                     onNavigateUp = returnToConnectionPage,
+                    active = { pagerState.settledPage == LOCAL_EFFECTS_PAGE && pagerState.targetPage == LOCAL_EFFECTS_PAGE },
                 )
             }
         }

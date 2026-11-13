@@ -37,10 +37,6 @@ data class PhotoDateRange private constructor(
     }
 }
 
-/** 只为最大值创建一个 LocalDate，避免渐进文件列表每次更新都为全部照片分配日期对象。 */
-internal fun latestCaptureLocalDate(captureDates: Sequence<String?>): LocalDate? =
-    captureDates.mapNotNull(::captureDayKey).maxOrNull()?.toLocalDate()
-
 /** Returns the range covering the newest actual shooting days, skipping empty calendar days. */
 internal fun newestCaptureDaysRange(
     files: Iterable<NikonCamera.FileInfo>,
@@ -55,6 +51,17 @@ internal fun newestCaptureDaysRange(
         .toList()
     if (keys.isEmpty()) return null
     return PhotoDateRange.between(keys.last().toLocalDate(), keys.first().toLocalDate())
+}
+
+/** Old visible rows do not prove a new scan reached its limit; the current batch must cross it. */
+internal fun crossedPhotoLoadingRange(
+    range: PhotoDateRange?,
+    batch: Iterable<NikonCamera.FileInfo>,
+): Boolean {
+    val oldestIncludedDay = range?.start?.toDayKey() ?: return false
+    return batch.any { file ->
+        captureDayKey(file.captureDate)?.let { it < oldestIncludedDay } == true
+    }
 }
 
 /** 主筛选面板使用的两位年份短摘要，保证起止日期格式稳定且适合单行显示。 */

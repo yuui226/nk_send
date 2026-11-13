@@ -11,7 +11,7 @@ class PhotoFilterOutputTest {
     @Test
     fun filterOnlyCopyHasStableRecognizableName() {
         val selection = PhotoFilterSelection(testFilter("0123456789abcdef"), 72)
-        val name = photoFrameOutputName(
+        val name = legacyPhotoFrameOutputName(
             sourceName = "DSC_0001.JPG",
             preset = PhotoFramePreset.MIST,
             watermark = PhotoFrameWatermark(enabled = false),
@@ -52,7 +52,7 @@ class PhotoFilterOutputTest {
         ))
     }
 
-    private fun outputName(filter: PhotoFilterSelection): String = photoFrameOutputName(
+    private fun outputName(filter: PhotoFilterSelection): String = legacyPhotoFrameOutputName(
         sourceName = "PHOTO.PNG",
         preset = PhotoFramePreset.MIST,
         watermark = PhotoFrameWatermark(enabled = false),

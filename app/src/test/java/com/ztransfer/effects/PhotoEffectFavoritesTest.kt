@@ -12,6 +12,35 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class PhotoEffectFavoritesTest {
+    @Test fun customFavoritesRemainRememberedWhileTheirDirectoryIsUnavailable() {
+        val custom = "np3:${"a".repeat(64)}"
+        val other = "np3:${"b".repeat(64)}"
+        val encoded = "$custom;builtin;$other;$custom;missing;np3:broken"
+        val restored = decodeFavoritePhotoFilters(encoded, setOf("builtin"))
+        assertEquals(listOf(FavoritePhotoFilter(custom), FavoritePhotoFilter("builtin"), FavoritePhotoFilter(other)), restored)
+        assertEquals(restored, decodeFavoritePhotoFilters(encodeFavoritePhotoFilters(restored), setOf("builtin")))
+    }
+
+    @Test fun customIntensityMemorySurvivesDirectoryChangesWithoutAcceptingUnknownKeys() {
+        val custom = "np3:${"c".repeat(64)}"
+        val sourceId = "$custom:np3-srgb-v1"
+        val restored = decodePhotoFilterIntensities(
+            "$custom,37;$sourceId,42;builtin,78;missing,20;np3:broken,60;$custom,90", setOf("builtin"),
+        )
+        assertEquals(mapOf(custom to 38, "builtin" to 78), restored)
+        assertEquals(restored, decodePhotoFilterIntensities(encodePhotoFilterIntensities(restored), setOf("builtin")))
+        assertEquals(mapOf(custom to 38), decodePhotoFilterIntensities(encodePhotoFilterIntensities(restored), emptySet()))
+    }
+
+    @Test fun transferAndLocalCustomIntensityMapsRemainIndependent() {
+        val custom = "np3:${"d".repeat(64)}"
+        val transfer = decodePhotoFilterIntensities("$custom,20", emptySet())
+        val local = decodePhotoFilterIntensities("$custom,80", emptySet())
+        assertEquals(20, transfer[custom])
+        assertEquals(80, local[custom])
+        assertEquals("$custom,20", encodePhotoFilterIntensities(transfer))
+    }
+
     @Test fun compactWidthFavoritesRoundTrip() {
         for (percent in listOf(60, 70, 80, 90)) {
             val favorite = FavoriteFrameWatermarkEffect.capture(PhotoFramePreset.PARAMETER_POSTER, PhotoFrameWatermark(), percent)

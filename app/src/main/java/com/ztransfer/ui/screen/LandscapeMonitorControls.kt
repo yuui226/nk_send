@@ -245,14 +245,15 @@ internal fun monitorToolRows(tools: List<RemoteTool>, columns: Int): List<List<R
     return listOf(firstRow) + regular.drop(firstCapacity).chunked(count)
 }
 
-/** Prevent outgoing/cached animation surfaces from activating controls or focusing behind them. */
+/** Block a fading surface only while it must not receive touches. An idle listener on the
+ *  open menu sits in front of its scroll and makes the drag stick, then spring back. */
 private fun Modifier.blockMonitorPanelInput(blocked: () -> Boolean) = composed {
-    val currentBlocked by rememberUpdatedState(blocked)
+    if (!blocked()) return@composed this
     pointerInput(Unit) {
         awaitPointerEventScope {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (currentBlocked()) event.changes.forEach { it.consume() }
+                event.changes.forEach { it.consume() }
             }
         }
     }

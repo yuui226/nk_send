@@ -82,6 +82,7 @@ fun AnchorPopup(
     // 大图上的编辑面板采用轻缩放，不扭曲照片与表单；默认弹窗仍沿用原动画。
     gentleMotion: Boolean = false,
     overlayContent: @Composable BoxScope.() -> Unit = {},
+    onClosing: () -> Unit = {},
     content: @Composable BoxScope.(close: () -> Unit) -> Unit
 ) {
     val colors = AppTheme.colors
@@ -92,12 +93,14 @@ fun AnchorPopup(
     val animationState = remember { PopupAnimationState() }
     val animationScope = rememberCoroutineScope()
     val currentOnDismiss by rememberUpdatedState(onDismiss)
+    val currentOnClosing by rememberUpdatedState(onClosing)
 
     // 关闭只驱动图层动画，不写 Compose State；否则设置面板会在收起首帧整树重组。
     val startClose: () -> Unit = {
         if (!animationState.closing) {
             animationState.closing = true
             animationState.interactive = false
+            currentOnClosing()
             animationScope.launch {
                 progress.animateTo(0f,
                     tween(((if (gentleMotion) 220 else GENIE_COLLAPSE_DURATION_MS) * progress.value).toInt().coerceAtLeast(1),

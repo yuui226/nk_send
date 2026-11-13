@@ -75,6 +75,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -87,15 +88,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -103,7 +106,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
@@ -150,7 +155,7 @@ import com.ztransfer.viewmodel.TransferStorageMode
 import com.ztransfer.viewmodel.TransferViewModel
 import com.ztransfer.viewmodel.compactDateRangeLabel
 import com.ztransfer.viewmodel.isTransferredOriginal
-import com.ztransfer.viewmodel.latestCaptureLocalDate
+import com.ztransfer.viewmodel.isQueuedForFrameGeneration
 import com.ztransfer.viewmodel.storageIdsBySlot
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -158,6 +163,7 @@ import kotlin.math.sin
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -180,6 +186,33 @@ data class AutoQueueFlightRequest(
 )
 
 internal fun burstCollectionGridKey(id: String): String = "burst_collection_$id"
+
+/** Resolve only when an interaction consumes the anchor, using its current scroll/animation position. */
+private fun LayoutCoordinates?.validBoundsInRoot(): Rect? {
+    if (this == null || !isAttached || size.width <= 0 || size.height <= 0) return null
+    return boundsInRoot().takeIf { it.width > 0f && it.height > 0f }
+}
+
+/** Ordinary references: scrolling updates coordinates without allocating a root-space Rect per cell. */
+private class VisibleItemBoundsRegistry<K> {
+    private val coordinates = HashMap<K, LayoutCoordinates>()
+
+    operator fun set(key: K, value: LayoutCoordinates) { coordinates[key] = value }
+    operator fun get(key: K): Rect? = coordinates[key].validBoundsInRoot()
+    // Only preview needs the full square behind a partially clipped visible cell. Keep queue
+    // flights on the existing visible bounds and do this lookup only when opening a preview.
+    fun fullBounds(key: K): Rect? = coordinates[key]?.takeIf { it.isAttached }?.let { source ->
+        source.findRootCoordinates().localBoundingBoxOf(source, clipBounds = false)
+            .takeIf { it.width > 0f && it.height > 0f }
+    }
+    fun remove(key: K) { coordinates.remove(key) }
+
+    fun snapshot(include: (K) -> Boolean): Map<K, Rect> = buildMap {
+        coordinates.forEach { (key, value) ->
+            if (include(key)) value.validBoundsInRoot()?.let { put(key, it) }
+        }
+    }
+}
 
 /** 只从当前真实可见的普通格位或折叠合集格位选择自动入队动画起点。 */
 internal fun resolveAutoQueueFlightSource(
@@ -210,6 +243,7 @@ internal data class FileListCameraUiState(
     val cameraManufacturer: String?,
     val cameraModel: String?,
     val effectPreviewExif: PhotoExif?,
+    val effectPreviewFileName: String? = null,
 )
 
 internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
@@ -225,6 +259,7 @@ internal fun CameraState.toFileListCameraUiState(): FileListCameraUiState =
         cameraManufacturer = cameraManufacturer,
         cameraModel = cameraModel,
         effectPreviewExif = effectPreviewExif,
+        effectPreviewFileName = effectPreviewFileName,
     )
 
 /** 与网格和预览直接相关的传输状态；高频下载进度仍走独立的 activeProgress 流。 */
@@ -431,35 +466,6 @@ internal fun queueExecutionControl(
     else -> null
 }
 
-@Composable
-private fun AnimatedQueuePillCount(
-    count: Int,
-    color: Color,
-    label: String,
-    modifier: Modifier = Modifier,
-) {
-    AnimatedContent(
-        modifier = modifier,
-        targetState = count,
-        transitionSpec = {
-            val dir = if (targetState < initialState) 1 else -1
-            (slideInVertically { it / 2 * dir } + fadeIn(tween(160)))
-                .togetherWith(
-                    slideOutVertically { -it / 2 * dir } + fadeOut(tween(120)),
-                )
-                .using(SizeTransform(clip = true, sizeAnimationSpec = { _, _ -> snap() }))
-        },
-        label = label,
-    ) { value ->
-        Text(
-            text = "$value",
-            style = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum"),
-            color = color,
-            fontWeight = FontWeight.Bold,
-        )
-    }
-}
-
 /** 队列入口收起为普通按钮时使用固定材质种子，保证木纹/金属微纹在重组后保持一致。 */
 private const val QUEUE_ENTRY_BUTTON_TEXTURE_SEED = 0x2A71E001
 private const val REMOTE_BUSY_VISUAL_DELAY_MS = 180L
@@ -469,23 +475,18 @@ private val TOP_BAR_COMPACT_BUTTON_MIN_WIDTH = 40.dp
 // 缩略图后台填充没有任何窗口/视口参数：未传输=从新到旧全量填充；传输中=完全停止。
 // 填充逻辑住在 CameraViewModel.startThumbnailFill（与页面无关）。
 
-// 主筛选与日期编辑共用固定宽度，切页时不横向重排面板。
-// 筛选内容包含五列类型按钮和三列日期波轮：手机上尽量利用横向空间，宽屏则封顶，
-// 避免固定窄面板挤压标签，也避免平板上横向铺得过散。
-// Keep the panel just wide enough for the fixed rating row: 14dp content padding on both sides,
-// the 81dp switch, its 8dp gap, and five 30dp stars with 1dp gaps. This makes the last star's
-// trailing margin identical to the right margin of the full-width “未传” chip row, without
-// changing the panel width when the rating controls crossfade.
-private val FILTER_PANEL_MAX_WIDTH = 14.dp * 2 + 81.dp + 8.dp + (30.dp * 5) + (1.dp * 4)
+// 主筛选与日期编辑共用宽度：标准内容宽 272dp，类型最多五列，标记三列。
+// 评级右侧固定容纳五颗星，左侧吸收窄屏差额；开关和切页都不改变面板宽度。
+private val FILTER_PANEL_MAX_WIDTH = 300.dp
 private val FILTER_PANEL_SCREEN_MARGIN = 12.dp
+private val FILTER_PANEL_CONTENT_PADDING = 14.dp
+private val FILTER_CONTROL_GAP = 8.dp
+private val FILTER_COMPACT_CONTROL_HEIGHT = 34.dp
+private val FILTER_RATING_CONTROLS_WIDTH = (30.dp * 5) + (1.dp * 4)
 private val DATE_FILTER_WHEEL_HEIGHT = 50.dp
 
 // 有彩色角标底（白字）的类型：其余走灰底灰字。提到顶层，避免每个格子每次重组都新建集合。
 private val TYPE_BADGE_COLORED_EXTS = setOf(".jpg", ".nef", ".mov", ".mp4")
-
-// 无拍摄日期文件的分组键（非显示文案，显示时映射到 R.string.unknown_date）。
-// 以 "zzz" 开头保证按键降序排序时排在所有 "yyyyMMdd" 日期之前，与原行为一致。
-private const val UNKNOWN_DATE_KEY = "zzz_unknown"
 
 // 回到顶部：翻过多少条目（含分组头）才算"够深"。
 private const val BACK_TO_TOP_MIN_INDEX = 30
@@ -496,9 +497,6 @@ private data class CollapsingGroup(val date: String, val keep: Int)
 private const val BURST_REFLOW_DURATION_MS = 300
 private const val BURST_MEMBER_ENTER_DURATION_MS = 180
 private const val BURST_MEMBER_EXIT_DURATION_MS = 150
-private const val CAMERA_REMOVAL_REFLOW_DURATION_MS = 280
-private const val CAMERA_REMOVAL_ENTER_DURATION_MS = 180
-private const val CAMERA_REMOVAL_EXIT_DURATION_MS = 160
 
 /**
  * 手风琴收合：按 [progress]（1→0）缩减条目报告给布局的高度（内容顶部对齐、超出裁掉），
@@ -532,36 +530,6 @@ fun groupFilesByDate(files: List<NikonCamera.FileInfo>): List<FileGroup> {
     }.sortedByDescending { it.date }
 }
 
-private data class PublishedCameraFileIdentity(
-    val fileName: String,
-    val size: Long,
-    val captureDate: String?,
-)
-
-private fun NikonCamera.FileInfo.publishedIdentity() = PublishedCameraFileIdentity(
-    fileName = fileName,
-    size = size,
-    captureDate = captureDate,
-)
-
-/** Dates whose logical camera photos disappeared in the latest authoritative update. */
-internal fun publishedCameraRemovalDates(
-    previous: List<NikonCamera.FileInfo>,
-    current: List<NikonCamera.FileInfo>,
-): Set<String> {
-    if (previous.isEmpty()) return emptySet()
-    val currentHandles = current.asSequence().mapTo(HashSet(current.size)) { it.handle }
-    val missingHandles = previous.filter { it.handle !in currentHandles }
-    if (missingHandles.isEmpty()) return emptySet()
-    // A dual-card backup can keep the same logical photo under its surviving alias handle. That is
-    // a session identity switch, not a visible deletion, and must not arm a grid exit animation.
-    val currentIdentities = current.asSequence()
-        .mapTo(HashSet(current.size)) { it.publishedIdentity() }
-    return missingHandles.asSequence()
-        .filter { it.publishedIdentity() !in currentIdentities }
-        .mapTo(LinkedHashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
-}
-
 @Composable
 fun FileListScreen(
     cameraViewModel: CameraViewModel,
@@ -593,7 +561,14 @@ fun FileListScreen(
     }.collectAsStateWithLifecycle(
         initialValue = transferViewModel.state.value.toFileListTransferUiState(),
     )
-    val recentThumbnailReadyDays by cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle()
+    // Only the rating scan uses this readiness. Background thumbnail batches must not
+    // recompose the whole page while ratings are off; enabling collects the current values.
+    val recentThumbnailReadyDays = if (transferState.filterRatingEnabled) {
+        cameraViewModel.recentThumbnailReadyDays.collectAsStateWithLifecycle().value
+    } else cameraViewModel.recentThumbnailReadyDays.value
+    val appliedPhotoLoadingDays = if (transferState.filterRatingEnabled) {
+        cameraViewModel.appliedPhotoLoadingDays.collectAsStateWithLifecycle().value
+    } else cameraViewModel.appliedPhotoLoadingDays.value
     val gpsContext = LocalContext.current
     val gpsBlockedByAp = state.isConnectedToCamera &&
         state.connectionType == CameraConnectionType.WIFI &&
@@ -601,54 +576,14 @@ fun FileListScreen(
     LaunchedEffect(gpsBlockedByAp) {
         NikonGpsService.setApModeBlocked(gpsContext, gpsBlockedByAp)
     }
-    // CameraState publishes authoritative removals immediately. The grid keeps its previous model
-    // for one frame only, so every existing animateItem node can arm before the new derived date /
-    // burst structure is submitted. No bitmap is copied and additions remain immediate.
-    var presentedCameraFiles by remember { mutableStateOf(state.files) }
-    var cameraRemovalReflowActive by remember { mutableStateOf(false) }
-    var cameraRemovalAffectedDates by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val cameraRemovalScope = rememberCoroutineScope()
-    val cameraRemovalEndJob = remember { arrayOfNulls<Job>(1) }
-    LaunchedEffect(
-        state.files,
-        state.isConnectedToCamera,
-        state.isLoadingFiles,
-        state.hasCompletedFileScan,
-    ) {
-        val target = state.files
-        val canAnimateRemoval = state.isConnectedToCamera &&
-            state.hasCompletedFileScan && !state.isLoadingFiles
-        val removedDates = if (canAnimateRemoval) {
-            publishedCameraRemovalDates(presentedCameraFiles, target)
-        } else {
-            emptySet()
-        }
-        if (removedDates.isNotEmpty()) {
-            cameraRemovalAffectedDates = cameraRemovalAffectedDates + removedDates
-            cameraRemovalReflowActive = true
-            // A newer removal owns the animation window immediately. Cancel the previous end timer
-            // before yielding a frame so it cannot clear the flags between arming and submission.
-            cameraRemovalEndJob[0]?.cancel()
-            cameraRemovalEndJob[0] = null
-            // The old keys must observe the exit/placement specs before the model drops them.
-            withFrameNanos { }
-            presentedCameraFiles = target
-            cameraRemovalEndJob[0] = cameraRemovalScope.launch {
-                delay((CAMERA_REMOVAL_REFLOW_DURATION_MS + 48).toLong())
-                cameraRemovalReflowActive = false
-                cameraRemovalAffectedDates = emptySet()
-                cameraRemovalEndJob[0] = null
-            }
-        } else {
-            presentedCameraFiles = target
-            if (!canAnimateRemoval) {
-                cameraRemovalEndJob[0]?.cancel()
-                cameraRemovalEndJob[0] = null
-                cameraRemovalReflowActive = false
-                cameraRemovalAffectedDates = emptySet()
-            }
-        }
-    }
+    val cameraCatalog = rememberPhotoCatalogPresentation(
+        files = state.files,
+        catalogReady = state.isConnectedToCamera &&
+            state.hasCompletedFileScan && !state.isLoadingFiles,
+    )
+    val presentedCameraFiles = cameraCatalog.files
+    val cameraCatalogReflowActive = cameraCatalog.motionActive
+    val cameraCatalogAffectedDates = cameraCatalog.affectedDates
     // The catalog remains complete for transfer/rating bookkeeping, while the visible grid and
     // its rating source snapshot honor the user's newest actual-shooting-day boundary.
     val photoLoadingRange = remember(presentedCameraFiles, transferState.photoLoadingDays) {
@@ -664,7 +599,7 @@ fun FileListScreen(
     var showSettings by remember { mutableStateOf(false) }
     var transferDirectoryAttention by remember { mutableStateOf(false) }
     // 双 Z 标按钮在根坐标系中的边界：设置面板贴其下缘展开（下拉弹窗），并以其中心为动画原点。
-    var zAnchor by remember { mutableStateOf<Rect?>(null) }
+    val zAnchor = remember { arrayOfNulls<Rect>(1) }
     // 高级版烟花彩蛋：设置面板里的"高级版"徽标点击时在本页放烟花（与连接页共用实现）。
     val fireworks = rememberFireworksState()
     // "整组吸入"动画：飞行中的卡片摞可并发多摞；终点、押扣和胶囊接住回弹
@@ -684,29 +619,28 @@ fun FileListScreen(
             if (abandonedCount > 0) latestQueueFlightsCancelled(abandonedCount)
         }
     }
-    // 每个格子在根坐标系的精确 bounds(格子本就为长按预览挂了 onGloballyPositioned,
-    // 顺手写进注册表,零额外监听)。普通 HashMap 而非快照状态:只在点击瞬间读取,
-    // 滚动期间的高频写入不触发任何重组；格子离开组合时主动删除，容量只随组合项数量增长。
-    val cellBoundsRegistry = remember { HashMap<Int, Rect>() }
+    // 只登记布局坐标引用，点击/预览/入队时才求根坐标，避免每帧给全部格子做坐标转换。
+    // 非快照容器不触发重组；格子离开组合时主动删除，容量只随组合项数量增长。
+    val cellBoundsRegistry = remember { VisibleItemBoundsRegistry<Int>() }
     // 折叠连拍是虚拟格位，没有单个 handle 的 ThumbnailCell；单独按稳定 burst id 记录，
     // 自动传输才能在合集确实可见时从合集本身起飞，而不是误用“屏外新增”的顶部起点。
-    val burstBoundsRegistry = remember { HashMap<String, Rect>() }
+    val burstBoundsRegistry = remember { VisibleItemBoundsRegistry<String>() }
     // 类型筛选下拉：开关 + 筛选按钮在根坐标系中的边界（面板贴其下缘展开）。
     var showFilter by remember { mutableStateOf(false) }
-    var filterAnchor by remember { mutableStateOf<Rect?>(null) }
+    val filterAnchor = remember { arrayOfNulls<Rect>(1) }
     // 弹出时冻结点击瞬间的有效坐标；顶栏随后因信号胶囊等重排也不再拖着面板跳动。
     var openedFilterAnchor by remember { mutableStateOf<Rect?>(null) }
     // 网格滚动状态提升到页面层供回顶按钮使用，但不能跨“列表被连接流程清空”保留。
     // 用空/非空作为状态槽身份：新连接的第一批照片会自然拿到全新的 0 位置状态；
     // 普通重组、继续分批加载以及离开子页面再返回都仍复用当前状态。
-    val gridState = key(presentedCameraFiles.isEmpty() && !cameraRemovalReflowActive) {
+    val gridState = key(presentedCameraFiles.isEmpty() && !cameraCatalogReflowActive) {
         rememberLazyGridState()
     }
     val scrollScope = rememberCoroutineScope()
     val previewDensity = LocalDensity.current
     // 提升到页面层：关闭预览前需要用同一份折叠状态定位照片所在的真实 LazyGrid 下标。
     val collapsedDates = remember { mutableStateMapOf<String, Boolean>() }
-    val atTop by remember {
+    val atTop by remember(gridState) {
         derivedStateOf {
             gridState.firstVisibleItemIndex == 0 && gridState.firstVisibleItemScrollOffset < 8
         }
@@ -728,15 +662,19 @@ fun FileListScreen(
             remoteIntroExpanded = false
         }
     }
-    LaunchedEffect(atTop) {
-        if (atTop) remoteExpandedAwayFromTop = false
-    }
-    LaunchedEffect(atTop, gridState.isScrollInProgress) {
-        if (!atTop && gridState.isScrollInProgress) {
-            // 首次提示也必须服从真实滚动：一旦离开顶部，立即恢复贴边收起态。
-            remoteIntroExpanded = false
-            remoteExpandedAwayFromTop = false
-        }
+    LaunchedEffect(gridState) {
+        // Observe scroll starts/stops outside composition: they must not recompose the
+        // whole photo page just to update these small entry controls.
+        snapshotFlow { atTop to gridState.isScrollInProgress }
+            .collect { (isAtTop, isScrolling) ->
+                if (isAtTop) {
+                    remoteExpandedAwayFromTop = false
+                } else if (isScrolling) {
+                    // 首次提示也必须服从真实滚动：一旦离开顶部，立即恢复贴边收起态。
+                    remoteIntroExpanded = false
+                    remoteExpandedAwayFromTop = false
+                }
+            }
     }
     // 回到顶部按钮的可见性：翻得够深 + 正向顶部方向滚动才出现；往深处翻/接近顶部
     // 立即隐藏；停止滚动一段时间后自动隐藏——静止画面上没有按钮，误触窗口极小。
@@ -765,11 +703,14 @@ fun FileListScreen(
                 lastOffset = offset
             }
     }
-    LaunchedEffect(showBackTop, gridState.isScrollInProgress) {
-        if (showBackTop && !gridState.isScrollInProgress) {
-            delay(1800)
-            showBackTop = false
-        }
+    LaunchedEffect(gridState) {
+        snapshotFlow { showBackTop && !gridState.isScrollInProgress }
+            .collectLatest { shouldHideAfterIdle ->
+                if (shouldHideAfterIdle) {
+                    delay(1800)
+                    showBackTop = false
+                }
+            }
     }
 
     // 底部玻璃提示条（通用）：退出确认、"相机未连接"等复用，替代系统 Toast。
@@ -858,13 +799,15 @@ fun FileListScreen(
     val photoLoadingDays = transferState.photoLoadingDays
     val ratingScan = rememberPhotoRatings(
         cameraViewModel.getCamera().takeIf { state.isConnectedToCamera },
-        filterRatingEnabled, displayedCameraFiles, paused = transferState.isTransferring || previewIndex != null,
+        filterRatingEnabled, state.files, paused = transferState.isTransferring || previewIndex != null,
         useObjectRating = state.connectionType == CameraConnectionType.USB || !state.isStaConnection,
         staConnection = state.isStaConnection,
         listLoading = state.isLoadingFiles,
+        hasCompletedFileScan = state.hasCompletedFileScan,
         recentThumbnailReadyDays = recentThumbnailReadyDays,
         ratingDays = filterRatingDays,
-        photoLoadingDays = photoLoadingDays)
+        photoLoadingDays = photoLoadingDays,
+        appliedPhotoLoadingDays = appliedPhotoLoadingDays)
     // Nikon STA does not expose a reliable protection value. Keep the existing AP/USB
     // protection filter intact, but do not apply a stale persisted value while in STA.
     val showProtectionFilter = !state.isStaConnection
@@ -905,7 +848,8 @@ fun FileListScreen(
     // temporary STA session so switching modes does not silently erase the user's setting.
     fun criteriaForPersistence(criteria: PhotoFilterCriteria): PhotoFilterCriteria =
         if (state.isStaConnection) {
-            criteria.copy(protectedOnly = transferState.filterProtectedOnly)
+            // A reset can precede recomposition; never restore the pre-reset hidden preference.
+            criteria.copy(protectedOnly = transferViewModel.state.value.filterProtectedOnly)
         } else {
             criteria
         }
@@ -916,7 +860,7 @@ fun FileListScreen(
 
     // 设备上实际存在的类型（从未过滤的原始列表提取，供下拉选项自动生成）。
     val availableExts = remember(displayedCameraFiles) {
-        displayedCameraFiles.map { it.extension }.distinct().sorted()
+        displayedCameraFiles.asSequence().map { it.extension }.distinct().sorted().toList()
     }
     // 扫描途中保留当前选择；完整扫描后只有确认存在双卡才允许卡槽筛选。
     // 单卡时筛选没有意义，归回“全部”也能保证入口按钮不会卡在激活状态。
@@ -933,6 +877,19 @@ fun FileListScreen(
                 )
         }
         if (normalized != filterStorageSlot || normalizedExts != filterExts) {
+            // 清除/编辑可能已经更新 ViewModel，但尚未触发本层重组；不能用旧快照
+            // 归一化后把日期、星级等条件写回。此检查到提交之间没有挂起点。
+            val current = transferViewModel.state.value
+            if (current.filterExtensions != filterExts ||
+                current.filterProtectedOnly != transferState.filterProtectedOnly ||
+                current.filterRatingEnabled != filterRatingEnabled ||
+                current.filterRating != filterRating ||
+                current.filterRatingDays != filterRatingDays ||
+                current.filterBurstOnly != filterBurst ||
+                current.filterUntransferredOnly != filterUntransferred ||
+                current.filterStorageSlot != filterStorageSlot ||
+                current.filterDateRange != filterDateRange
+            ) return@LaunchedEffect
             transferViewModel.setFilters(criteriaForPersistence(filterCriteria.copy(
                 storageSlot = normalized,
                 extensions = normalizedExts,
@@ -949,16 +906,10 @@ fun FileListScreen(
             filterRevealWindow = false
         }
     }
-    val latestKnownDate = remember(displayedCameraFiles) {
-        latestCaptureLocalDate(displayedCameraFiles.asSequence().map { it.captureDate })
-    }
     // 连拍检测基于原始列表，只在文件列表变化时重算。角标、筛选和合集都共享这一份
     // 结果，避免三个功能对“哪些照片属于连拍”产生分歧。
     val burstGroups = remember(displayedCameraFiles) {
         computeBurstGroups(displayedCameraFiles)
-    }
-    val burstHandles = remember(burstGroups) {
-        burstGroups.flatMapTo(HashSet()) { group -> group.files.map { it.handle } }
     }
     val burstIdByHandle = remember(burstGroups) {
         buildMap {
@@ -967,10 +918,13 @@ fun FileListScreen(
             }
         }
     }
+    // This index is immutable after construction; its key view serves every membership check.
+    val burstHandles = remember(burstIdByHandle) { burstIdByHandle.keys }
     // 已传对号与“未传输”筛选必须共用这一个判定，避免界面同时出现
     // “带对号却仍在未传输列表”的自相矛盾。
     val exportedHandlesForFilter: Set<Int> = remember(
         presentedCameraFiles,
+        transferState.existingExportIndex,
         transferState.existingExportRevision,
         transferState.storageMode,
         filterUntransferred,
@@ -1045,16 +999,20 @@ fun FileListScreen(
         }
     }
     // 分组 / 扁平列表（供长按预览翻页）/ 传输忙碌（缩略图让路）——提到顶层，供内容区与预览层共用。
-    val activeRatingValues = if (filterRating != null) ratingScan.values else emptyMap()
+    val matchingRatingHandles = remember(filterRating, ratingScan.values) {
+        if (filterRating == null) emptySet() else ratingScan.values.asSequence()
+            .filter { it.value == filterRating }
+            .mapTo(HashSet()) { it.key }
+    }
     val groups = remember(
         displayedCameraFiles, filterExts, filterProtected, filterBurst, filterUntransferred,
-        filterRating, activeRatingValues,
+        filterRating, matchingRatingHandles,
         filterStorageSlot, selectedStorageIds, filterDateRange,
         burstHandles, filteredExportHandles
     ) {
         val files = displayedCameraFiles.asSequence()
             .filter { filterExts == null || it.extension in filterExts }
-            .filter { filterRating == null || activeRatingValues[it.handle] == filterRating }
+            .filter { filterRating == null || it.handle in matchingRatingHandles }
             .filter { !filterProtected || it.isProtected }
             .filter { !filterBurst || it.handle in burstHandles }
             .filter { !filterUntransferred || it.handle !in filteredExportHandles }
@@ -1069,6 +1027,7 @@ fun FileListScreen(
     LaunchedEffect(presentedCameraFiles) {
         // Filters temporarily hide complete date groups; that must not erase the user's collapsed
         // choices. Only camera rows actually disappearing make a remembered date stale.
+        if (collapsedDates.isEmpty()) return@LaunchedEffect
         val validDates = presentedCameraFiles
             .mapTo(HashSet()) { it.captureDate?.take(8) ?: UNKNOWN_DATE_KEY }
         collapsedDates.keys
@@ -1081,7 +1040,9 @@ fun FileListScreen(
     // Only burst-id reconciliation reads this history; a plain holder avoids a redundant
     // recomposition after recording the latest groups.
     val previousBurstGroups = remember { arrayOf(burstGroups) }
-    val requestedExpandedBurstIds = expandedBurstCollections.keys.toSet()
+    val requestedExpandedBurstIds by remember {
+        derivedStateOf { expandedBurstCollections.keys.toSet() }
+    }
     val expandedBurstIds = remember(
         transferState.collapseBurstPhotos,
         burstGroups,
@@ -1140,6 +1101,7 @@ fun FileListScreen(
         onDispose { latestPreviewVisibilityChanged(false) }
     }
     var previewAnchor by remember { mutableStateOf<Rect?>(null) }
+    var previewAnchorClip by remember { mutableStateOf<Rect?>(null) }
     var previewSourceAtOpen by remember { mutableStateOf<Any?>(null) }
     var previewBuildJob by remember { mutableStateOf<Job?>(null) }
     var previewReturnHandle by remember { mutableStateOf<Int?>(null) }
@@ -1176,8 +1138,8 @@ fun FileListScreen(
         val visibleSource = resolveAutoQueueFlightSource(
             files = request.files,
             visibleKeys = visibleKeys,
-            cellBoundsByHandle = cellBoundsRegistry,
-            burstBoundsById = burstBoundsRegistry,
+            cellBoundsByHandle = cellBoundsRegistry.snapshot { it in visibleKeys },
+            burstBoundsById = burstBoundsRegistry.snapshot { burstCollectionGridKey(it) in visibleKeys },
             burstIdByHandle = burstIdByHandle,
         )
         val root = pageBoundsRef[0] ?: return@LaunchedEffect
@@ -1218,6 +1180,7 @@ fun FileListScreen(
         }
     }
     val onPreview: (NikonCamera.FileInfo, Rect) -> Unit = { file, rect ->
+        val fullSource = cellBoundsRegistry.fullBounds(file.handle) ?: rect
         // 几千张照片时构建分页快照会产生一批临时集合；不要把这段 O(n) 工作塞在
         // 长按手势的主线程回调里，否则动画第一帧会被推迟甚至直接错过。
         haptics.longPress()
@@ -1235,7 +1198,8 @@ fun FileListScreen(
                 previewSessionId++
                 previewItems = snapshot
                 updatePreviewIndex(idx)
-                previewAnchor = rect
+                previewAnchor = fullSource
+                previewAnchorClip = rect
                 previewSourceAtOpen = sourceAtOpen
             }
         }
@@ -1261,6 +1225,7 @@ fun FileListScreen(
                     previewItems = snapshot
                     updatePreviewIndex(idx)
                     previewAnchor = rect
+                    previewAnchorClip = rect
                     previewSourceAtOpen = sourceAtOpen
                 }
             }
@@ -1347,7 +1312,7 @@ fun FileListScreen(
 
     // 关闭预览前把当前照片放回视野。很远时先在全黑预览层后无感预定位到相邻几行，
     // 再走 LazyGrid 自身的短程平滑滚动；这样不会让框架为性能做的长距离跳段暴露出来。
-    val preparePreviewDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? =
+    val preparePreviewDismissTarget: suspend (NikonCamera.FileInfo) -> PreviewAnchorBounds? =
         prepare@{ file ->
             val groupsSnapshot = groups
             val stillInCurrentResults = withContext(Dispatchers.Default) {
@@ -1418,9 +1383,11 @@ fun FileListScreen(
                 )
                 withFrameNanos { }
             }
-            // 等一帧让 onGloballyPositioned 注册最新根坐标；找不到就退化为原地淡出。
+            // 等一帧让目标格子登记布局坐标，再按当前位置求边界；找不到就原地淡出。
             withFrameNanos { }
-            cellBoundsRegistry[file.handle]
+            cellBoundsRegistry[file.handle]?.let { visible ->
+                PreviewAnchorBounds(cellBoundsRegistry.fullBounds(file.handle) ?: visible, visible)
+            }
         }
 
     // 根需不透明底色：与队列页左右滑动转场期间两页同屏层叠，透明根会让底层页面透出。
@@ -1447,104 +1414,24 @@ fun FileListScreen(
         }
 
         if (presentedCameraFiles.isEmpty() &&
-            !cameraRemovalReflowActive &&
+            !cameraCatalogReflowActive &&
             (!state.isConnectedToCamera || (!state.isLoadingFiles && state.hasCompletedFileScan))
         ) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(horizontal = 32.dp)
-                ) {
-                    if (!state.isConnectedToCamera) {
-                        // 首次加载失败、重连后再次掉线、进程恢复都可能进入空列表断开态。
-                        // 与顶栏使用同一套会话/恢复模式，不能把所有无线连接都当作 AP。
-                        val usbMode =
-                            disconnectedConnectionType(state.connectionType) ==
-                                CameraConnectionType.USB
-                        val presentation = disconnectedCameraPresentation(state.connectionType, state.isStaConnection)
-                        if (usbMode) {
-                            ClassicUsbIcon(
-                                tint = colors.statusError,
-                                modifier = Modifier.size(64.dp)
-                            )
-                        } else if (state.isStaConnection) {
-                            StaSignalIcon(
-                                connected = false,
-                                tint = colors.statusError,
-                                modifier = Modifier.size(64.dp),
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.WifiOff,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = colors.statusError
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            stringResource(presentation.title),
-                            color = colors.onBackground,
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            stringResource(presentation.hint),
-                            color = colors.onSurfaceVariant,
-                            style = MaterialTheme.typography.bodySmall,
-                            textAlign = TextAlign.Center
-                        )
-                        presentation.actionLabel?.let { actionLabel ->
-                            Spacer(modifier = Modifier.height(20.dp))
-                            GlassButton(
-                                onClick = {
-                                    if (state.isStaConnection) {
-                                        cameraViewModel.retryStaConnection()
-                                    } else try {
-                                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                                    } catch (_: Exception) {}
-                                }
-                            ) {
-                                if (!state.isStaConnection) {
-                                    Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
-                                }
-                                Text(
-                                    stringResource(actionLabel),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Medium,
-                                    color = colors.onBackground
-                                )
-                            }
-                        }
-                    } else {
-                        // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
-                        val breathe = rememberInfiniteTransition(label = "emptyList")
-                        val breatheAlpha by breathe.animateFloat(
-                            initialValue = 0.35f, targetValue = 0.6f,
-                            animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
-                            label = "emptyListAlpha"
-                        )
-                        Icon(
-                            Icons.Default.FolderOff, contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
-                        if (state.connectionType == CameraConnectionType.USB) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                stringResource(R.string.usb_turn_on_camera_hint),
-                                color = colors.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
-                }
-            }
+            FileListEmptyState(
+                connected = state.isConnectedToCamera,
+                connectionType = state.connectionType,
+                staMode = state.isStaConnection,
+                onReconnect = {
+                    if (state.isStaConnection) {
+                        cameraViewModel.retryStaConnection()
+                    } else try {
+                        context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                    } catch (_: Exception) {}
+                },
+            )
         }
 
-        if (presentedCameraFiles.isNotEmpty() || cameraRemovalReflowActive) {
+        if (presentedCameraFiles.isNotEmpty() || cameraCatalogReflowActive) {
             // 分组批量传输。gating 用响应式的 isConnectedToCamera；
             // 队列内部经 provider 现取当前相机实例，中途重连后续传任务自动用新连接。
             // 单文件入队见外层 enqueueSingleFile；这里仅处理日期整组。
@@ -1597,22 +1484,69 @@ fun FileListScreen(
                 }
             }
 
-            // 筛选后无匹配：给出指认原因的空态（原始列表非空，只是被筛掉了）。
+            ThumbnailGrid(
+                groups = groups,
+                tasks = transferState.tasks,
+                queuedIndexByHandle = queuedIndexByHandle,
+                existingExportIndex = transferState.existingExportIndex,
+                existingExportRevision = transferState.existingExportRevision,
+                storageMode = transferState.storageMode,
+                activeProgressFlow = transferViewModel.activeTransferProgress,
+                columns = transferState.thumbnailColumns,
+                isLoading = state.isLoadingFiles,
+                transfersBusy = transfersBusy,
+                allowRemoteThumbnails = allowGridRemoteThumbnails(previewIndex != null),
+                collapsedDates = collapsedDates,
+                cameraViewModel = cameraViewModel,
+                onTransferGroup = onTransferGroup,
+                onTapFile = onTapFile,
+                onPreview = onPreview,
+                onPreviewBurst = onPreviewBurst,
+                tapToPreview = transferState.tapToPreview,
+                cellBoundsRegistry = cellBoundsRegistry,
+                burstBoundsRegistry = burstBoundsRegistry,
+                burstHandles = burstHandles,
+                burstIdByHandle = burstIdByHandle,
+                collapseBurstPhotos = transferState.collapseBurstPhotos,
+                expandedBursts = expandedBurstCollections,
+                expandedBurstIds = expandedBurstIds,
+                contentPadding = listPadding,
+                gridState = gridState,
+                filterRevealTick = filterRevealTick,
+                filterRevealWindow = filterRevealWindow,
+                exitingExportHandles = exitingExportHandles.keys,
+                exportReflowActive = exportReflowActive,
+                cameraCatalogReflowActive = cameraCatalogReflowActive,
+                cameraCatalogAffectedDates = cameraCatalogAffectedDates,
+                returnFocusHandle = previewReturnHandle,
+                returnFocusNonce = previewReturnNonce,
+                onExportExitFinished = { handle ->
+                    if (handle in exitingExportHandles) {
+                        finishedExportExitHandles = finishedExportExitHandles + handle
+                        exitingExportHandles.remove(handle)
+                        exportReflowTick++
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // 空态放在网格之后：空网格仍会命中滚动手势，不能盖住“清除筛选”。
+            // 保持网格挂载，保留滚动及列表动画状态；其他浮层仍显示在空态之上。
             if (filterActive && groups.isEmpty() && state.hasCompletedFileScan &&
-                !cameraRemovalReflowActive
+                !cameraCatalogReflowActive
             ) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         // 空态缓慢呼吸（与其余空态同参数）。
                         val breathe = rememberInfiniteTransition(label = "emptyFilter")
-                        val breatheAlpha by breathe.animateFloat(
+                        val breatheAlpha = breathe.animateFloat(
                             initialValue = 0.35f, targetValue = 0.6f,
                             animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
                             label = "emptyFilterAlpha"
                         )
                         FilterMark(
-                            modifier = Modifier.size(44.dp),
-                            color = colors.onSurfaceVariant.copy(alpha = breatheAlpha)
+                            modifier = Modifier.size(44.dp).graphicsLayer { alpha = breatheAlpha.value },
+                            color = colors.onSurfaceVariant.copy(alpha = 1f)
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         if (!(filterRatingEnabled && filterRating != null && ratingScan.loading)) {
@@ -1640,51 +1574,6 @@ fun FileListScreen(
                     }
                 }
             }
-
-            ThumbnailGrid(
-                groups = groups,
-                tasks = transferState.tasks,
-                queuedIndexByHandle = queuedIndexByHandle,
-                existingExportIndex = transferState.existingExportIndex,
-                existingExportRevision = transferState.existingExportRevision,
-                storageMode = transferState.storageMode,
-                activeProgressFlow = transferViewModel.activeTransferProgress,
-                columns = transferState.thumbnailColumns,
-                isLoading = state.isLoadingFiles,
-                transfersBusy = transfersBusy,
-                allowRemoteThumbnails = allowGridRemoteThumbnails(previewIndex != null),
-                collapsedDates = collapsedDates,
-                cameraViewModel = cameraViewModel,
-                onTransferGroup = onTransferGroup,
-                onTapFile = onTapFile,
-                onPreview = onPreview,
-                onPreviewBurst = onPreviewBurst,
-                tapToPreview = transferState.tapToPreview,
-                cellBoundsRegistry = cellBoundsRegistry,
-                burstBoundsRegistry = burstBoundsRegistry,
-                burstHandles = burstHandles,
-                burstIdByHandle = burstIdByHandle,
-                collapseBurstPhotos = transferState.collapseBurstPhotos,
-                expandedBursts = expandedBurstCollections,
-                contentPadding = listPadding,
-                gridState = gridState,
-                filterRevealTick = filterRevealTick,
-                filterRevealWindow = filterRevealWindow,
-                exitingExportHandles = exitingExportHandles.keys,
-                exportReflowActive = exportReflowActive,
-                cameraRemovalReflowActive = cameraRemovalReflowActive,
-                cameraRemovalAffectedDates = cameraRemovalAffectedDates,
-                returnFocusHandle = previewReturnHandle,
-                returnFocusNonce = previewReturnNonce,
-                onExportExitFinished = { handle ->
-                    if (handle in exitingExportHandles) {
-                        finishedExportExitHandles = finishedExportExitHandles + handle
-                        exitingExportHandles.remove(handle)
-                        exportReflowTick++
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
         }
 
         // ---------- 监看入口（左下角毛玻璃相机钮） ----------
@@ -1693,37 +1582,7 @@ fun FileListScreen(
         // 传输进行中禁止进入监看：监看要独占相机通道（LV 取帧连续占锁），与下载抢锁会两败俱伤。
         // 图标压暗示意不可用，点击给出提示而非静默无响应。
         val remoteBlockedHint = stringResource(R.string.remote_blocked_transfer)
-        val remoteEntryDescription = stringResource(R.string.cd_remote_entry)
         val remoteExpanded = atTop || remoteExpandedAwayFromTop || remoteIntroExpanded
-        val remoteReveal = animateFloatAsState(
-            targetValue = if (remoteExpanded) 1f else 0f,
-            animationSpec = spring(dampingRatio = 0.58f, stiffness = 360f),
-            label = "remoteEntryReveal"
-        )
-        val remotePeekInteraction = remember { MutableInteractionSource() }
-        val density = LocalDensity.current
-        val hiddenTravelPx = with(density) { 48.dp.toPx() }
-        val playfulLiftPx = with(density) { 6.dp.toPx() }
-        val introLabel = stringResource(R.string.remote_entry_intro)
-        val introTextStyle = MaterialTheme.typography.labelMedium.copy(
-            fontSize = 13.sp, fontWeight = FontWeight.Medium,
-        )
-        val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
-        val introLabelWidth = remember(introLabel, introTextStyle, density) {
-            with(density) {
-                introTextMeasurer.measure(introLabel, introTextStyle, softWrap = false).size.width.toDp()
-            }
-        }
-        val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
-        val remoteButtonWidth by animateDpAsState(
-            targetValue = if (remoteIntroExpanded) introButtonWidth else 52.dp,
-            animationSpec = if (remoteIntroExpanded) {
-                Motion.bouncy()
-            } else {
-                tween(300, easing = FastOutSlowInEasing)
-            },
-            label = "remoteEntryWidth",
-        )
         val openRemote: () -> Unit = {
             // 端侧录制与照片传输共用同一个 SAF 保存目录。与加入传输队列的
             // 拦截顺序一致：目录未设置时先引导设置，不进入监看后再让用户返工。
@@ -1737,109 +1596,28 @@ fun FileListScreen(
                 onNavigateToRemote()
             }
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .navigationBarsPadding()
-                .padding(bottom = 40.dp)
-                .size(width = introButtonWidth + 24.dp, height = 56.dp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            GlassButton(
-                onClick = {
-                    transferViewModel.markRemoteEntryUsed()
-                    remoteIntroExpanded = false
-                    if (remoteExpanded) {
-                        openRemote()
-                    } else {
-                        haptics.tick()
-                        remoteExpandedAwayFromTop = true
-                    }
-                },
-                modifier = Modifier
-                    .offset(x = 20.dp)
-                    .width(remoteButtonWidth)
-                    .height(52.dp)
-                    .graphicsLayer {
-                        // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
-                        val progress = remoteReveal.value.coerceIn(-0.12f, 1.12f)
-                        val pathProgress = progress.coerceIn(0f, 1f)
-                        val arc = sin(pathProgress * Math.PI).toFloat()
-                        translationX = -hiddenTravelPx * (1f - progress)
-                        translationY = -playfulLiftPx * arc
-                        val scale = 0.88f + 0.12f * progress
-                        scaleX = scale
-                        scaleY = scale
-                        rotationZ = -3.5f * (1f - pathProgress) + arc * 1.25f
-                        transformOrigin = TransformOrigin.Center
-                    },
-                shape = CircleShape,
-                contentPadding = PaddingValues(14.dp),
-                showSheen = false,
-                active = remoteIntroExpanded && !transfersBusyVisual,
-                activeColor = colors.accentBlue,
-                // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
-                // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
-                frostedOpacityBoost = 0.35f,
-                // 入口必须走公共按钮材质：毛玻璃、钛合金、木纹均与当前主题同步。
-                // 按压缩放由 GlassButton 统一提供，不在此重复实现。
-                shadowElevation = 6.dp
-            ) {
-                RemoteMark(
-                    modifier = Modifier
-                        .size(24.dp),
-                    color = if (transfersBusyVisual) {
-                        colors.onSurfaceVariant.copy(alpha = 0.5f)
-                    } else {
-                        colors.accentBlue
-                    },
-                    // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
-                    contentDescription = remoteEntryDescription.takeIf { remoteExpanded }
-                )
-                AnimatedVisibility(
-                    visible = remoteIntroExpanded,
-                    enter = fadeIn(tween(180, delayMillis = 70)) +
-                        expandHorizontally(
-                            animationSpec = tween(250, easing = FastOutSlowInEasing),
-                            expandFrom = Alignment.Start,
-                        ),
-                    exit = fadeOut(tween(120)) +
-                        shrinkHorizontally(
-                            animationSpec = tween(240, easing = FastOutSlowInEasing),
-                            shrinkTowards = Alignment.Start,
-                        ),
-                ) {
-                    Text(
-                        text = introLabel,
-                        color = if (transfersBusyVisual) colors.onSurfaceVariant else colors.onBackground,
-                        style = introTextStyle,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.clearAndSetSemantics { },
-                    )
+        FileListRemoteEntry(
+            expanded = remoteExpanded,
+            introExpanded = remoteIntroExpanded,
+            busyVisual = transfersBusyVisual,
+            onClick = {
+                transferViewModel.markRemoteEntryUsed()
+                remoteIntroExpanded = false
+                if (remoteExpanded) {
+                    openRemote()
+                } else {
+                    haptics.tick()
+                    remoteExpandedAwayFromTop = true
                 }
-            }
-            if (!remoteExpanded) {
-                // 视觉上只露出半颗，但保留 48dp 的屏内点击热区，兼顾发现性与可访问性。
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .fillMaxHeight()
-                        .width(48.dp)
-                        .semantics { contentDescription = remoteEntryDescription }
-                        .clickable(
-                            interactionSource = remotePeekInteraction,
-                            indication = null,
-                            role = Role.Button
-                        ) {
-                            transferViewModel.markRemoteEntryUsed()
-                            remoteIntroExpanded = false
-                            haptics.tick()
-                            remoteExpandedAwayFromTop = true
-                        }
-                )
-            }
-        }
+            },
+            onPeek = {
+                transferViewModel.markRemoteEntryUsed()
+                remoteIntroExpanded = false
+                haptics.tick()
+                remoteExpandedAwayFromTop = true
+            },
+            modifier = Modifier.align(Alignment.BottomStart),
+        )
 
         // ---------- 回到顶部（右下角毛玻璃圆钮）：仅在深处向顶部滚动时短暂出现 ----------
         AnimatedVisibility(
@@ -1985,7 +1763,7 @@ fun FileListScreen(
                         materialContentColor = colors.accentYellow,
                         modifier = Modifier
                             .height(36.dp)
-                            .onGloballyPositioned { zAnchor = it.boundsInRoot() }
+                            .onGloballyPositioned { if (it.isAttached) zAnchor[0] = it.boundsInRoot() }
                     ) {
                         ZMark(modifier = Modifier.height(20.dp))
                     }
@@ -2036,7 +1814,7 @@ fun FileListScreen(
                                 showFilter = false
                                 openedFilterAnchor = null
                             } else {
-                                filterAnchor?.let { measuredAnchor ->
+                                filterAnchor[0]?.let { measuredAnchor ->
                                     openedFilterAnchor = measuredAnchor
                                     showFilter = true
                                 }
@@ -2055,7 +1833,7 @@ fun FileListScreen(
                             // 图标按钮统一采用 40dp 紧凑宽度；实体主题也提前给出同一测量基线，
                             // 避免不同材质的可见边缘发生偏移。
                             .widthIn(min = TOP_BAR_COMPACT_BUTTON_MIN_WIDTH)
-                            .onGloballyPositioned { filterAnchor = it.boundsInRoot() }
+                            .onGloballyPositioned { if (it.isAttached) filterAnchor[0] = it.boundsInRoot() }
                     ) {
                         // 自绘筛选标志（与信号条同族的圆头杆件语言）；已设筛选时高亮。
                         FilterMark(
@@ -2100,7 +1878,6 @@ fun FileListScreen(
                 ratingProgress = ratingScan,
                 storageSlots = visibleStorageSlots,
                 showProtectionFilter = showProtectionFilter,
-                suggestedDate = latestKnownDate,
                 hapticsEnabled = transferState.hapticsEnabled,
                 onChange = { criteria, animateList ->
                     // FilterOverlay 只在工作状态确实变化时回调；这里每次都提交。
@@ -2120,6 +1897,7 @@ fun FileListScreen(
                         ))
                     )
                 },
+                onReset = transferViewModel::clearFilters,
                 onDismiss = {
                     showFilter = false
                     openedFilterAnchor = null
@@ -2132,12 +1910,13 @@ fun FileListScreen(
             SettingsOverlay(
                 viewModel = transferViewModel,
                 effectPreviewSource = state.effectPreviewBitmap,
+                effectPreviewSourceName = state.effectPreviewFileName.orEmpty(),
                 effectPreviewCameraManufacturer = state.cameraManufacturer,
                 effectPreviewCameraModel = state.cameraModel,
                 effectPreviewExif = state.effectPreviewExif,
                 requestTransferDirectoryAttention = transferDirectoryAttention,
                 onEffectPreviewRequested = cameraViewModel::requestEffectPreview,
-                anchorBounds = zAnchor,
+                anchorBounds = zAnchor[0],
                 onDismiss = {
                     showSettings = false
                     transferDirectoryAttention = false
@@ -2163,6 +1942,7 @@ fun FileListScreen(
                     // 打开仍从原格子坐标展开；关闭时会重新定位当前照片并使用最新坐标，
                     // 此处的旧坐标只负责首帧，模型改变也不会再缩回错误格位。
                     anchorRect = previewAnchor.takeIf { previewSourceAtOpen === previewSourceIdentity },
+                    anchorVisibleRect = previewAnchorClip.takeIf { previewSourceAtOpen === previewSourceIdentity },
                     cameraViewModel = cameraViewModel,
                     hapticsEnabled = transferState.hapticsEnabled,
                     transfersBusy = transfersBusy,
@@ -2241,12 +2021,7 @@ fun FileListScreen(
                 .navigationBarsPadding()
                 .padding(bottom = 28.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(22.dp),
-                color = colors.glassSurfaceHeavy,
-                shadowElevation = 6.dp,
-                border = BorderStroke(1.dp, colors.glassPanelBorder)
-            ) {
+            GlassHintSurface {
                 Text(
                     hintText,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -2326,57 +2101,281 @@ fun FileListScreen(
     }
 }
 
+/** Keep empty-state layout and its animation out of the large photo-list composition. */
+@Composable
+private fun FileListEmptyState(
+    connected: Boolean,
+    connectionType: CameraConnectionType?,
+    staMode: Boolean,
+    onReconnect: () -> Unit,
+) {
+    val colors = AppTheme.colors
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = 32.dp)
+        ) {
+            if (!connected) {
+                // 首次加载失败、重连后再次掉线、进程恢复都可能进入空列表断开态。
+                // 与顶栏使用同一套会话/恢复模式，不能把所有无线连接都当作 AP。
+                val usbMode =
+                    disconnectedConnectionType(connectionType) ==
+                        CameraConnectionType.USB
+                val presentation = disconnectedCameraPresentation(connectionType, staMode)
+                if (usbMode) {
+                    ClassicUsbIcon(
+                        tint = colors.statusError,
+                        modifier = Modifier.size(64.dp)
+                    )
+                } else if (staMode) {
+                    StaSignalIcon(
+                        connected = false,
+                        tint = colors.statusError,
+                        modifier = Modifier.size(64.dp),
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.WifiOff,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = colors.statusError
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    stringResource(presentation.title),
+                    color = colors.onBackground,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    stringResource(presentation.hint),
+                    color = colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
+                )
+                presentation.actionLabel?.let { actionLabel ->
+                    Spacer(modifier = Modifier.height(20.dp))
+                    GlassButton(
+                        onClick = onReconnect
+                    ) {
+                        if (!staMode) {
+                            Icon(Icons.Default.WifiOff, contentDescription = null, tint = colors.statusError, modifier = Modifier.size(20.dp))
+                        }
+                        Text(
+                            stringResource(actionLabel),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Medium,
+                            color = colors.onBackground
+                        )
+                    }
+                }
+            } else {
+                // 空态缓慢呼吸（与队列页空态同参数）：页面此时无其它动态，不至于死板。
+                val breathe = rememberInfiniteTransition(label = "emptyList")
+                val breatheAlpha = breathe.animateFloat(
+                    initialValue = 0.35f, targetValue = 0.6f,
+                    animationSpec = infiniteRepeatable(tween(1600), RepeatMode.Reverse),
+                    label = "emptyListAlpha"
+                )
+                Icon(
+                    Icons.Default.FolderOff, contentDescription = null,
+                    modifier = Modifier.size(64.dp).graphicsLayer { alpha = breatheAlpha.value },
+                    tint = colors.onSurfaceVariant.copy(alpha = 1f)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(stringResource(R.string.no_photos_on_camera), color = colors.onSurfaceVariant)
+                if (connectionType == CameraConnectionType.USB) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        stringResource(R.string.usb_turn_on_camera_hint),
+                        color = colors.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Entry measurements/animations compile separately; navigation state stays in FileListScreen. */
+@Composable
+private fun FileListRemoteEntry(
+    expanded: Boolean,
+    introExpanded: Boolean,
+    busyVisual: Boolean,
+    onClick: () -> Unit,
+    onPeek: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = AppTheme.colors
+    val remoteEntryDescription = stringResource(R.string.cd_remote_entry)
+    val remoteReveal = animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.58f, stiffness = 360f),
+        label = "remoteEntryReveal"
+    )
+    val remotePeekInteraction = remember { MutableInteractionSource() }
+    val density = LocalDensity.current
+    val hiddenTravelPx = with(density) { 48.dp.toPx() }
+    val playfulLiftPx = with(density) { 6.dp.toPx() }
+    val introLabel = stringResource(R.string.remote_entry_intro)
+    val introTextStyle = MaterialTheme.typography.labelMedium.copy(
+        fontSize = 13.sp, fontWeight = FontWeight.Medium,
+    )
+    val introTextMeasurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val introLabelWidth = remember(introLabel, introTextStyle, density) {
+        with(density) {
+            introTextMeasurer.measure(introLabel, introTextStyle, softWrap = false).size.width.toDp()
+        }
+    }
+    val introButtonWidth = maxOf(140.dp, introLabelWidth + 62.dp)
+    val remoteButtonWidth = animateDpAsState(
+        targetValue = if (introExpanded) introButtonWidth else 52.dp,
+        animationSpec = if (introExpanded) {
+            Motion.bouncy()
+        } else {
+            tween(300, easing = FastOutSlowInEasing)
+        },
+        label = "remoteEntryWidth",
+    )
+    Box(
+        modifier = modifier
+            .navigationBarsPadding()
+            .padding(bottom = 40.dp)
+            .size(width = introButtonWidth + 24.dp, height = 56.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        GlassButton(
+            onClick = onClick,
+            modifier = Modifier
+                .offset(x = 20.dp)
+                .layout { measurable, constraints ->
+                    val width = remoteButtonWidth.value.roundToPx()
+                        .coerceIn(constraints.minWidth, constraints.maxWidth)
+                    val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+                    layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
+                }
+                .height(52.dp)
+                .graphicsLayer {
+                    // 弹簧允许轻微越界；路径中段上抬，收起时带一点俏皮歪头。
+                    val progress = remoteReveal.value.coerceIn(-0.12f, 1.12f)
+                    val pathProgress = progress.coerceIn(0f, 1f)
+                    val arc = sin(pathProgress * Math.PI).toFloat()
+                    translationX = -hiddenTravelPx * (1f - progress)
+                    translationY = -playfulLiftPx * arc
+                    val scale = 0.88f + 0.12f * progress
+                    scaleX = scale
+                    scaleY = scale
+                    rotationZ = -3.5f * (1f - pathProgress) + arc * 1.25f
+                    transformOrigin = TransformOrigin.Center
+                },
+            shape = CircleShape,
+            contentPadding = PaddingValues(14.dp),
+            showSheen = false,
+            active = introExpanded && !busyVisual,
+            activeColor = colors.accentBlue,
+            // 深色由 0.38 提至约 0.60，浅色由 0.80 提至约 0.87；
+            // 仍能透出背景，但入口不会再像一层几乎看不见的薄膜。
+            frostedOpacityBoost = 0.35f,
+            // 入口必须走公共按钮材质：毛玻璃、钛合金、木纹均与当前主题同步。
+            // 按压缩放由 GlassButton 统一提供，不在此重复实现。
+            shadowElevation = 6.dp
+        ) {
+            RemoteMark(
+                modifier = Modifier
+                    .size(24.dp),
+                color = if (busyVisual) {
+                    colors.onSurfaceVariant.copy(alpha = 0.5f)
+                } else {
+                    colors.accentBlue
+                },
+                // 收起时由屏内 48dp 热区承担唯一语义，避免无障碍树出现两个同名入口。
+                contentDescription = remoteEntryDescription.takeIf { expanded }
+            )
+            AnimatedVisibility(
+                visible = introExpanded,
+                enter = fadeIn(tween(180, delayMillis = 70)) +
+                    expandHorizontally(
+                        animationSpec = tween(250, easing = FastOutSlowInEasing),
+                        expandFrom = Alignment.Start,
+                    ),
+                exit = fadeOut(tween(120)) +
+                    shrinkHorizontally(
+                        animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        shrinkTowards = Alignment.Start,
+                    ),
+            ) {
+                Text(
+                    text = introLabel,
+                    color = if (busyVisual) colors.onSurfaceVariant else colors.onBackground,
+                    style = introTextStyle,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
+        }
+        if (!expanded) {
+            // 视觉上只露出半颗，但保留 48dp 的屏内点击热区，兼顾发现性与可访问性。
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxHeight()
+                    .width(48.dp)
+                    .semantics { contentDescription = remoteEntryDescription }
+                    .clickable(
+                        interactionSource = remotePeekInteraction,
+                        indication = null,
+                        role = Role.Button
+                    ) {
+                        onPeek()
+                    }
+            )
+        }
+    }
+}
+
 internal data class QueuePillTaskSummary(
     val downloadRemaining: Int,
     val generationRemaining: Int,
-    val activeDownloadTaskId: Long?,
-    val activeProgressTaskId: Long?,
+    val activeDownloadTask: TransferTask?,
     val hasActive: Boolean,
-    val hasCancelled: Boolean,
 )
 
 /** 单次遍历生成胶囊所需的低频队列摘要；高频进度重组期间直接复用。 */
 internal fun summarizeQueuePillTasks(tasks: List<TransferTask>): QueuePillTaskSummary {
     var downloadRemaining = 0
     var generationRemaining = 0
-    var activeDownloadTaskId: Long? = null
-    var firstGeneratingTaskId: Long? = null
-    var firstWaitingTaskId: Long? = null
-    var hasCancelled = false
+    var activeDownloadTask: TransferTask? = null
 
     tasks.forEach { task ->
         when (task.status) {
             TransferStatus.WAITING -> {
-                downloadRemaining++
-                if (firstWaitingTaskId == null) firstWaitingTaskId = task.taskId
+                if (!task.isGeneratingFrame) downloadRemaining++
             }
             TransferStatus.TRANSFERING -> {
                 // Crop tasks remain TRANSFERING until crop/effects finish; the network
                 // download has already ended once their generation stage starts.
                 if (!task.isGeneratingFrame) {
                     downloadRemaining++
-                    if (activeDownloadTaskId == null) activeDownloadTaskId = task.taskId
+                    if (activeDownloadTask == null) activeDownloadTask = task
                 }
             }
-            TransferStatus.CANCELLED -> hasCancelled = true
+            TransferStatus.CANCELLED,
             TransferStatus.COMPLETED,
             TransferStatus.FAILED -> Unit
         }
-        if (task.isGeneratingFrame) {
+        if (task.isQueuedForFrameGeneration) {
             generationRemaining++
-            if (firstGeneratingTaskId == null) firstGeneratingTaskId = task.taskId
         }
     }
 
     return QueuePillTaskSummary(
         downloadRemaining = downloadRemaining,
         generationRemaining = generationRemaining,
-        activeDownloadTaskId = activeDownloadTaskId,
-        activeProgressTaskId = activeDownloadTaskId
-            ?: firstGeneratingTaskId
-            ?: firstWaitingTaskId,
-        hasActive = activeDownloadTaskId != null || generationRemaining > 0,
-        hasCancelled = hasCancelled,
+        activeDownloadTask = activeDownloadTask,
+        hasActive = activeDownloadTask != null || generationRemaining > 0,
     )
 }
 
@@ -2506,10 +2505,16 @@ fun QueuePill(
     onClick: () -> Unit,
     // 显示层押扣:飞行中的"整组包裹"承载的文件数,落袋前不计入读数
     //（数字在包裹到达时才跳上去);实际队列不受影响,仅影响本胶囊显示。
-    heldCount: Int = 0
+    heldCount: Int = 0,
+    visible: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val liveProgress by activeProgressFlow.collectAsStateWithLifecycle()
+    val widthAnim = remember { Animatable(0f).apply { updateBounds(lowerBound = 0f) } }
+    val animateContents by remember(visible) {
+        derivedStateOf { visible || widthAnim.value > 0f }
+    }
     val taskSummary = remember(transferState.tasks) {
         summarizeQueuePillTasks(transferState.tasks)
     }
@@ -2524,9 +2529,10 @@ fun QueuePill(
     // still follows the real task state: that temporary zero uses the icon, never the Done state.
     val allDone = downloadRemaining == 0 && generationRemaining == 0
     val transferring = transferState.isTransferring
-    val activeProgress = liveProgress?.takeIf {
-        it.taskId == taskSummary.activeDownloadTaskId
-    }
+    val downloadDisplay = rememberQueueDownloadDisplay(
+        transferState.tasks, taskSummary.activeDownloadTask, liveProgress,
+        animate = animateContents,
+    )
     // Keep the last valid batch speed across the short preparation gap between two files.
     val activeSpeed = liveProgress?.retainedBytesPerSecond ?: 0L
     val activeSpeedText = activeSpeed
@@ -2548,40 +2554,34 @@ fun QueuePill(
             else -> false
         }
     }
-    // "done → 图标" 的转场只由"传输中 → 全部完成"触发。prevAllDone 初值取当前 allDone：
-    // 若进入本页时已是完成态（例如从队列页返回），不再闪 done，直接显示图标（无转场动画）。
-    var showDoneLabel by remember { mutableStateOf(false) }
-    var prevAllDone by remember { mutableStateOf(allDone) }
-    // 本轮队列是否真的下载过（用于完成震动：纯"已存在跳过"的瞬时完成不震）。
-    var sawTransfer by remember { mutableStateOf(false) }
-    var finishProgressVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(hasActive) {
-        if (hasActive) sawTransfer = true
+    // Evaluate each structural snapshot once. Committing the reducer below must not consume
+    // its event again on route, width, speed or timer recompositions. Only this batch's
+    // observed outcomes count; old failed/cancelled history cannot suppress a new success.
+    var completionState by remember { mutableStateOf(QueueCompletionState()) }
+    val completionUpdate = remember(transferState.tasks) {
+        queueCompletionUpdate(completionState, transferState.tasks)
     }
-    // 取消导致的"归零"不是完成：不闪 done、不震成功震（否则取消后出现庆祝反馈，误导）。
-    // sawTransfer 在每次归零时都复位，取消那轮的记录不能污染下一轮的完成判定。
-    val hasCancelled = taskSummary.hasCancelled
+    var showDoneLabel by remember { mutableStateOf(false) }
+    var doneNonce by remember { mutableLongStateOf(0L) }
     // Keep the active pill mounted on the very first completion frame, before the effect runs.
     // Otherwise it briefly becomes GlassButton, destroying AnimatedContent before Done appears.
-    val completionPending = allDone && !prevAllDone && !hasCancelled
-    LaunchedEffect(allDone) {
-        val justCompleted = allDone && !prevAllDone
-        // Commit the edge before suspension; a new task may cancel the Done hold at any time.
-        prevAllDone = allDone
-        if (!allDone) {
+    val completionPending = completionState != completionUpdate.nextState &&
+        completionUpdate.completion?.showDone == true
+    LaunchedEffect(transferState.tasks) {
+        completionState = completionUpdate.nextState
+        // Hidden existing-output checks are still unfinished work, even with no visible count.
+        if (completionUpdate.nextState.unresolvedTaskIds.isNotEmpty()) showDoneLabel = false
+        completionUpdate.completion?.let { feedback ->
+            showDoneLabel = feedback.showDone
+            if (feedback.showDone) doneNonce++
+            if (feedback.celebrate) haptics.success()
+        }
+    }
+    // Unrelated terminal metadata updates must not cancel the timeout and leave Done stuck.
+    LaunchedEffect(showDoneLabel, doneNonce) {
+        if (showDoneLabel) {
+            delay(1800)
             showDoneLabel = false
-            finishProgressVisible = false
-        } else if (justCompleted) {
-            val celebrate = !hasCancelled && sawTransfer
-            sawTransfer = false
-            finishProgressVisible = celebrate
-            if (!hasCancelled) {
-                if (celebrate) haptics.success()
-                showDoneLabel = true
-                delay(1800)
-                showDoneLabel = false
-            }
-            finishProgressVisible = false
         }
     }
     // 尚无飞行卡片落袋时显示默认图标而不是数字 0；这条优先于 PAUSED，确保“选完再传”
@@ -2590,28 +2590,18 @@ fun QueuePill(
         actualRemaining = downloadRemaining,
         heldCount = heldCount,
     )
+    // A successful visible download gets its own short finish even if another task or its
+    // following generation failed. Include the frame before the display effect runs.
+    val finishingDownload = downloadDisplay.completing || queueDownloadCompletedTask(
+        downloadDisplay.task?.taskId, taskSummary.activeDownloadTask, transferState.tasks,
+    ) != null
     val collapsedToIcon = allRemainingTasksAreInFlight ||
-        (mode != PillMode.PAUSED && (
-            (allDone && !showDoneLabel && !completionPending) || (!allDone && !countingVisible)
+        (!finishingDownload && mode != PillMode.PAUSED && (
+            (allDone && !showDoneLabel && !completionPending) ||
+                // Actual work and the previous file's finish hold take effect in this frame,
+                // before the countingVisible effect; otherwise a fast handoff flashes the icon.
+                (!allDone && !countingVisible && !hasActive)
         ))
-
-    // 进度条 = 当前单文件进度（复用传输页语义）。保留最近的进度归属，让最后一张
-    // 完成后仍能从当前位置顺滑补满，而不是因“当前任务”瞬间消失而重建动画。
-    var retainedProgressTaskId by remember { mutableStateOf<Long?>(null) }
-    LaunchedEffect(taskSummary.activeProgressTaskId) {
-        taskSummary.activeProgressTaskId?.let { retainedProgressTaskId = it }
-    }
-    val barFraction = when {
-        allDone && (finishProgressVisible || (completionPending && sawTransfer)) -> 1f
-        allDone -> 0f // 静止图标态不预热动画，避免下一轮等待阶段错误继承满格。
-        activeProgress != null -> activeProgress.fraction
-        generationRemaining > 0 -> 1f
-        else -> 0f
-    }
-    val animatedBar = rememberSmoothTransferProgress(
-        targetProgress = barFraction,
-        resetKey = taskSummary.activeProgressTaskId ?: retainedProgressTaskId,
-    )
 
     // 普通按钮与胶囊共用同一条宽度弹簧。切换材质实现时右缘仍固定，只向左平滑伸缩，
     // 不会因为图标态改用 GlassButton 而丢掉原先的胶囊变形手感。
@@ -2620,8 +2610,9 @@ fun QueuePill(
     var activeQueueMaxWidthPx by remember { mutableStateOf(0) }
     var measuredWidthKey by remember { mutableStateOf<QueuePillWidthKey?>(null) }
     val collapsedWidthPx = with(density) { 40.dp.toPx() } // 22dp 图标 + 左右各 9dp
-    val widthAnim = remember { Animatable(0f) }
     var firstMeasure by remember { mutableStateOf(true) }
+    var lastAnimatedVisibility by remember { mutableStateOf(visible) }
+    var visibilityTransition by remember { mutableStateOf(false) }
     val stableContentWidthPx = if (
         mode == PillMode.COUNTING && measuredWidthKey == widthKey
     ) {
@@ -2629,15 +2620,46 @@ fun QueuePill(
     } else {
         contentWidthPx
     }
-    val targetWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
-    LaunchedEffect(targetWidthPx) {
-        if (targetWidthPx > 0f) {
+    val naturalWidthPx = if (collapsedToIcon) collapsedWidthPx else stableContentWidthPx.toFloat()
+    val targetWidthPx = if (visible) naturalWidthPx else 0f
+    LaunchedEffect(targetWidthPx, visible) {
+        if (lastAnimatedVisibility != visible) {
+            visibilityTransition = true
+            lastAnimatedVisibility = visible
+        }
+        if (!visible || targetWidthPx > 0f) {
             if (firstMeasure) {
                 widthAnim.snapTo(targetWidthPx)
                 firstMeasure = false
             } else {
                 widthAnim.animateTo(targetWidthPx, Motion.bouncy())
             }
+            visibilityTransition = false
+        }
+    }
+
+    // Route changes use this same width spring, not a second visibility animation. Keep the
+    // content measured at its natural width so hidden speed/count changes are ready on return.
+    val widthModifier = if (!firstMeasure || !visible) {
+        // Read animated width in measurement, as the remote-entry button does. The capsule
+        // still takes real layout space, without recomposing its contents on every spring frame.
+        Modifier.layout { measurable, constraints ->
+            val width = widthAnim.value.roundToInt()
+                .coerceIn(constraints.minWidth, constraints.maxWidth)
+            val placeable = measurable.measure(constraints.copy(minWidth = width, maxWidth = width))
+            layout(placeable.width, placeable.height) { placeable.placeRelative(0, 0) }
+        }
+    } else Modifier
+    val pillModifier = modifier.height(36.dp).then(widthModifier).graphicsLayer {
+        // Normal data-driven changes stay opaque; only the final few pixels fade at zero.
+        alpha = if (firstMeasure && visible) 1f else
+            (widthAnim.value / with(density) { 8.dp.toPx() }).coerceIn(0f, 1f)
+    }.queuePillVisibilityEdgeFade {
+        // Only route visibility uses the feathered edge. Normal speed/count width changes
+        // keep their original opaque shell, and a reversed route change retraces the same fade.
+        if (!visibilityTransition || naturalWidthPx <= 0f) 0f else {
+            val fade = ((1f - widthAnim.value / naturalWidthPx) / 0.18f).coerceIn(0f, 1f)
+            fade * fade * (3f - 2f * fade)
         }
     }
 
@@ -2647,19 +2669,13 @@ fun QueuePill(
     if (collapsedToIcon) {
         GlassButton(
             onClick = onClick,
+            enabled = visible,
+            disabledAlpha = 1f,
             shape = RoundedCornerShape(22.dp),
             contentPadding = PaddingValues(horizontal = 9.dp, vertical = 7.dp),
             enforceMinimumTouchTarget = false,
             textureSeed = QUEUE_ENTRY_BUTTON_TEXTURE_SEED,
-            modifier = Modifier
-                .height(36.dp)
-                .then(
-                    if (widthAnim.value > 0f) {
-                        Modifier.width(with(density) { widthAnim.value.toDp() })
-                    } else {
-                        Modifier
-                    }
-                )
+            modifier = pillModifier,
         ) {
             Icon(
                 imageVector = Icons.Default.Checklist,
@@ -2674,34 +2690,31 @@ fun QueuePill(
     // 按压微缩放：本胶囊是顶栏唯一手写 Surface（不经 GlassButton），手感与全局按钮对齐。
     val pillInteraction = remember { MutableInteractionSource() }
     val pillPressed by pillInteraction.collectIsPressedAsState()
-    val pillPressScale by animateFloatAsState(
+    val pillPressScale = animateFloatAsState(
         targetValue = if (pillPressed) 0.95f else 1f,
         animationSpec = if (pillPressed) tween(80) else Motion.bouncy(),
         label = "pillPress"
     )
     Surface(
         onClick = onClick,
+        enabled = visible,
         shape = RoundedCornerShape(22.dp),
         color = colors.glassSurface,   // 毛玻璃半透明底（与 "Z传" 一致）
         shadowElevation = 4.dp,
         interactionSource = pillInteraction,
-        modifier = Modifier
-            .height(36.dp)
+        modifier = pillModifier
             .graphicsLayer {
-                scaleX = pillPressScale
-                scaleY = pillPressScale
+                scaleX = pillPressScale.value
+                scaleY = pillPressScale.value
             }
-            // 用动画宽度；首帧未测量时先按内容自适应，测到后即锁定为动画宽度。
-            .then(if (contentWidthPx > 0) Modifier.width(with(density) { widthAnim.value.toDp() }) else Modifier)
     ) {
         Box(contentAlignment = Alignment.CenterEnd) {
             // 1) 单文件进度填充（填满当前动画宽度；收起为图标后不显示）。
-            if (!allDone || finishProgressVisible || (completionPending && sawTransfer)) {
+            if (downloadDisplay.task != null && animateContents) {
                 LiquidProgressFill(
-                    progress = { animatedBar.value },
-                    waveEligible = taskSummary.activeDownloadTaskId != null ||
-                        finishProgressVisible,
-                    seedKey = taskSummary.activeProgressTaskId ?: retainedProgressTaskId,
+                    progress = { downloadDisplay.progress.value },
+                    waveEligible = animateContents,
+                    seedKey = downloadDisplay.task?.taskId,
                     color = colors.accentBlue.copy(alpha = 0.35f),
                     modifier = Modifier.matchParentSize(),
                 )
@@ -2741,20 +2754,25 @@ fun QueuePill(
                     // 尺寸动画交给外层的弹性宽度弹簧（snap 禁用 AnimatedContent 自带的尺寸
                     // 动画，避免两套叠加）；计数态内部的数字/速度更新不触发转场，原地刷新。
                     AnimatedContent(
-                        targetState = Triple(mode, remaining, activeSpeedText),
-                        contentKey = { it.first },
+                        targetState = Triple(mode, remaining, activeSpeedText to activeSpeed) to (showDoneLabel || completionPending),
+                        contentKey = { it.first.first },
                         // 胶囊右缘钉死、向左伸缩：新旧内容必须都锚定右缘（CenterEnd），
                         // 否则容器 snap 到新宽度时，退场内容会从右对齐跳成左对齐（文字漂移）。
                         contentAlignment = Alignment.CenterEnd,
                         transitionSpec = {
-                            fadeIn(tween(220, delayMillis = 35))
-                                .togetherWith(fadeOut(tween(160)))
+                            val entering = if (animateContents) fadeIn(tween(220, delayMillis = 35))
+                                else androidx.compose.animation.EnterTransition.None
+                            val exiting = if (animateContents) fadeOut(tween(160))
+                                else androidx.compose.animation.ExitTransition.None
+                            entering.togetherWith(exiting)
                                 .using(SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> snap() }))
                         },
                         label = "pillContent"
-                    ) { (displayedMode, displayedCount, displayedSpeed) ->
+                    ) { (displayed, displayDoneLabel) ->
+                        val (displayedMode, displayedCount, displayedSpeedSnapshot) = displayed
+                        val (displayedSpeed, displayedSpeedValue) = displayedSpeedSnapshot
                         when (displayedMode) {
-                            PillMode.DONE ->
+                            PillMode.DONE -> if (displayDoneLabel) {
                                 Text(
                                     // 刻意不走字符串资源:所有语言统一显示 "Done"(短暂闪现的
                                     // 状态徽记,当装饰性标识处理,不参与本地化)。
@@ -2764,11 +2782,20 @@ fun QueuePill(
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 16.dp)
                                 )
+                            } else {
+                                // Only a successful download's finish can keep this otherwise
+                                // collapsed state mounted. Preserve its width without claiming
+                                // the whole batch succeeded (e.g. another batch member failed).
+                                Spacer(Modifier.width(with(density) {
+                                    contentWidthPx.coerceAtLeast(collapsedWidthPx.toInt()).toDp()
+                                }))
+                            }
                             PillMode.PAUSED ->
                                 AnimatedQueuePillCount(
                                     count = displayedCount,
                                     color = colors.onBackground,
                                     label = "pausedCount",
+                                    animate = animateContents,
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                 )
                             PillMode.GENERATING ->
@@ -2787,6 +2814,7 @@ fun QueuePill(
                                         count = displayedCount,
                                         color = colors.onBackground,
                                         label = "generationCount",
+                                        animate = animateContents,
                                     )
                                 }
                             PillMode.COUNTING ->
@@ -2797,11 +2825,13 @@ fun QueuePill(
                                 ) {
                                     // 速度在前（仅传输且有速度时显示）。tnum：等宽数字，位数相同则宽度恒定。
                                     if (displayedSpeed != null) {
-                                        Text(
+                                        AnimatedQueuePillValue(
                                             text = displayedSpeed,
-                                            style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                            value = displayedSpeedValue,
                                             color = colors.accentBlue,
-                                            fontWeight = FontWeight.Bold
+                                            label = "queueSpeed",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            animate = animateContents,
                                         )
                                     }
                                     // 数字滚动：减少（传输推进）时旧数上滑、新数自下滑入；增加（新入队）反向。
@@ -2810,11 +2840,43 @@ fun QueuePill(
                                         count = displayedCount,
                                         color = colors.onBackground,
                                         label = "downloadCount",
+                                        animate = animateContents,
                                     )
                                 }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Erase the closing/opening right edge without painting over the page behind the pill. */
+private fun Modifier.queuePillVisibilityEdgeFade(amount: () -> Float): Modifier = drawWithCache {
+    val spill = 16.dp.toPx()
+    val bounds = Rect(-spill, -spill, size.width + spill, size.height + spill)
+    val feather = minOf(24.dp.toPx(), size.width)
+    val edge = Brush.horizontalGradient(
+        listOf(Color.Transparent, Color.Black),
+        startX = (size.width - feather).coerceAtLeast(0f),
+        endX = size.width.coerceAtLeast(1f),
+    )
+    val layerPaint = Paint()
+    onDrawWithContent {
+        val fade = amount()
+        if (fade <= 0f || size.width <= 0f) {
+            drawContent()
+        } else {
+            // Include the existing shadow; an exact-size offscreen layer would introduce a
+            // new rectangular shadow crop. The temporary layer isolates DstOut from siblings.
+            val canvas = drawContext.canvas
+            canvas.saveLayer(bounds, layerPaint)
+            try {
+                drawContent()
+                drawRect(edge, topLeft = bounds.topLeft, size = bounds.size,
+                    alpha = fade, blendMode = BlendMode.DstOut)
+            } finally {
+                canvas.restore()
             }
         }
     }
@@ -3253,7 +3315,7 @@ private fun GroupHeader(
         // 日期 + 展开箭头 + 张数合并为一颗毛玻璃"日期胶囊"，整颗可点切换收起/展开：
         // 触点比原来的小图标大得多，规格与右侧"传输"按钮同语言（28dp 高、8dp 圆角）。
         // 箭头用旋转动画（收起朝下、展开转 180°），比图标切换更顺滑。
-        val chevron by animateFloatAsState(
+        val chevron = animateFloatAsState(
             targetValue = if (collapsed) 0f else 180f,
             label = "chevron"
         )
@@ -3265,7 +3327,7 @@ private fun GroupHeader(
         ) {
             Text(
                 text = if (group.date == UNKNOWN_DATE_KEY) stringResource(R.string.unknown_date)
-                       else formatDateHeader(group.date),
+                       else remember(group.date) { formatDateHeader(group.date) },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 color = colors.onBackground
@@ -3276,7 +3338,7 @@ private fun GroupHeader(
                 tint = colors.accentBlue,
                 modifier = Modifier
                     .size(18.dp)
-                    .rotate(chevron)
+                    .graphicsLayer { rotationZ = chevron.value }
             )
             // 仅数字（去掉"张"），tnum 等宽，界面更简约
             AnimatedContent(
@@ -3300,21 +3362,16 @@ private fun GroupHeader(
         Spacer(modifier = Modifier.weight(1f))
         // 整组传输始终允许再次加入；任务执行时分别检查原片和边框是否已经存在。
         // 按钮在根坐标系的 bounds 供"整组吸入"动画定位起飞点。
-        var plusBounds by remember { mutableStateOf<Rect?>(null) }
+        // Bounds are consumed only by a click. Layout/scroll updates must not recompose the header.
+        val plusCoordinates = remember { arrayOfNulls<LayoutCoordinates>(1) }
         GlassButton(
-            onClick = { onTransferGroup(group.files, plusBounds) },
+            onClick = { onTransferGroup(group.files, plusCoordinates[0].validBoundsInRoot()) },
             enabled = group.files.isNotEmpty(),
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier
                 .width(40.dp)
                 .height(28.dp)
-                .onGloballyPositioned {
-                    // 只收有效样本，避免分离/复用瞬间的零矩形污染动画起点。
-                    if (it.isAttached) {
-                        val b = it.boundsInRoot()
-                        if (b.width > 0f && b.height > 0f) plusBounds = b
-                    }
-                },
+                .onGloballyPositioned { plusCoordinates[0] = it },
             contentPadding = PaddingValues(horizontal = 10.dp),
             enforceMinimumTouchTarget = false,
         ) {
@@ -3342,9 +3399,13 @@ internal fun buildThumbnailGridItems(
 
     // 先按当前筛选后的日期组收集成员。筛选可能令原本 ≥3 张的连拍只剩 1 张；
     // 单张不再画“合集”，避免用户为看一张照片还要多点一次。
-    val visibleBursts = files
-        .mapNotNull { file -> burstIdByHandle[file.handle]?.let { it to file } }
-        .groupBy({ it.first }, { it.second })
+    // Keep member order identical to the filtered list without allocating a Pair and an
+    // intermediate full-size list for every member whenever a collection is toggled.
+    val visibleBursts = HashMap<String, MutableList<NikonCamera.FileInfo>>()
+    files.forEach { file ->
+        val burstId = burstIdByHandle[file.handle] ?: return@forEach
+        visibleBursts.getOrPut(burstId) { ArrayList() }.add(file)
+    }
     val collected = HashSet<String>()
     val result = ArrayList<ThumbnailGridItem>(files.size)
 
@@ -3418,12 +3479,13 @@ private fun ThumbnailGrid(
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     onPreviewBurst: (String, List<NikonCamera.FileInfo>, Rect) -> Unit,
     tapToPreview: Boolean,
-    cellBoundsRegistry: MutableMap<Int, Rect>,
-    burstBoundsRegistry: MutableMap<String, Rect>,
+    cellBoundsRegistry: VisibleItemBoundsRegistry<Int>,
+    burstBoundsRegistry: VisibleItemBoundsRegistry<String>,
     burstHandles: Set<Int>,
     burstIdByHandle: Map<Int, String>,
     collapseBurstPhotos: Boolean,
     expandedBursts: MutableMap<String, Boolean>,
+    expandedBurstIds: Set<String>,
     contentPadding: PaddingValues,
     gridState: LazyGridState,
     modifier: Modifier = Modifier,
@@ -3434,8 +3496,8 @@ private fun ThumbnailGrid(
     filterRevealWindow: Boolean = false,
     exitingExportHandles: Set<Int> = emptySet(),
     exportReflowActive: Boolean = false,
-    cameraRemovalReflowActive: Boolean = false,
-    cameraRemovalAffectedDates: Set<String> = emptySet(),
+    cameraCatalogReflowActive: Boolean = false,
+    cameraCatalogAffectedDates: Set<String> = emptySet(),
     returnFocusHandle: Int? = null,
     returnFocusNonce: Int = 0,
     onExportExitFinished: (Int) -> Unit = {}
@@ -3446,6 +3508,10 @@ private fun ThumbnailGrid(
     val thumbnailBorderColor = remember(thumbnailSkin, thumbnailDark) {
         thumbnailThemeBorderColor(thumbnailSkin, thumbnailDark)
     }
+    // Cached and newly loaded first-screen cells share one entrance, without per-cell jobs or
+    // added layout/scale work. The settled state stays at 1 for scrolling and subsequent scans.
+    val firstBatchOpacity = rememberThumbnailBatchEntrance(groups.isNotEmpty())
+    val firstBatchAlpha: () -> Float = remember(firstBatchOpacity) { { firstBatchOpacity.value } }
 
     // 日期展开/收起动画（手风琴方案；不用条目位移动画——它对"被推出屏幕的条目"有框架级
     // 边缘悬停，对"从屏外移入"的条目又根本不生效，大日期组收起时什么动画都看不到）：
@@ -3468,7 +3534,6 @@ private fun ThumbnailGrid(
 
     // 连拍展开/收起只做一次原子模型更新。成员的出现/消失与所有存量条目的重排均交给
     // Foundation 1.7 的 LazyGrid animateItem：不裁剪屏外成员、不分批、不逐排改模型。
-    val expandedBurstIds = expandedBursts.keys.toSet()
     var burstReflowActive by remember { mutableStateOf(false) }
     var activeBurstReflowId by remember { mutableStateOf<String?>(null) }
     var burstAnimationBusy by remember { mutableStateOf(false) }
@@ -3503,21 +3568,24 @@ private fun ThumbnailGrid(
 
     // “未传输”筛选的单格退场原本由 ThumbnailCell 回调完成。折叠合集里的成员不会
     // compose，必须在这里直接结算，否则它会永远滞留在过滤快照中。
-    val hiddenBurstHandles = remember(itemsByDate, expandedBurstIds) {
-        itemsByDate.values.asSequence()
+    val hasExitingExports = exitingExportHandles.isNotEmpty()
+    val hiddenBurstHandles = remember(itemsByDate, expandedBurstIds, hasExitingExports) {
+        if (!hasExitingExports) emptySet() else itemsByDate.values.asSequence()
             .flatten()
             .filterIsInstance<ThumbnailGridItem.BurstCollection>()
             .filter { it.id !in expandedBurstIds }
             .flatMap { it.files.asSequence() }
             .mapTo(HashSet()) { it.handle }
     }
-    val hiddenExitingHandles = exitingExportHandles.intersect(hiddenBurstHandles)
+    // The caller can pass live SnapshotStateMap.keys; do not memoize that mutable view.
+    val hiddenExitingHandles = if (exitingExportHandles.isEmpty()) emptySet()
+        else exitingExportHandles.intersect(hiddenBurstHandles)
     LaunchedEffect(hiddenExitingHandles) {
         hiddenExitingHandles.forEach(onExportExitFinished)
     }
 
     val toggleBurstCollection: (String) -> Unit = { burstId ->
-        if (!burstAnimationBusy && collapsing == null && !cameraRemovalReflowActive) {
+        if (!burstAnimationBusy && collapsing == null && !cameraCatalogReflowActive) {
             burstAnimationBusy = true
             burstAnimationJob = burstScope.launch {
                 try {
@@ -3532,7 +3600,7 @@ private fun ThumbnailGrid(
                     activeBurstReflowId = burstId
                     burstReflowActive = true
                     withFrameNanos { }
-                    if (expandedBursts[burstId] == true) {
+                    if (burstId in expandedBurstIds) {
                         expandedBursts.remove(burstId)
                     } else {
                         expandedBursts[burstId] = true
@@ -3562,10 +3630,10 @@ private fun ThumbnailGrid(
             val collapsed = collapsedDates[group.date] == true
             val collapsingThis = collapsing?.date == group.date
             val groupItems = itemsByDate[group.date].orEmpty()
-            // Camera-side deletion only animates the date group that actually changed. Other date
-            // groups must not acquire per-cell placement work merely because an earlier group shrank.
-            val cameraRemovalAffectsGroup = cameraRemovalReflowActive &&
-                group.date in cameraRemovalAffectedDates
+            // Only the date groups with actual camera additions/removals own item motion.
+            // Unchanged groups do not acquire per-cell placement work on every catalog update.
+            val cameraCatalogAffectsGroup = cameraCatalogReflowActive &&
+                group.date in cameraCatalogAffectedDates
             // 所有既有格位——照片、合集、日期标题——严格共享同一个 placementSpec。
             // 空闲时传 null，但 animateItem 节点始终存在，不会因临时挂载 modifier 错帧。
             val placementSpec = when {
@@ -3574,8 +3642,8 @@ private fun ThumbnailGrid(
                     durationMillis = BURST_REFLOW_DURATION_MS,
                     easing = FastOutSlowInEasing
                 )
-                cameraRemovalAffectsGroup -> tween<IntOffset>(
-                    durationMillis = CAMERA_REMOVAL_REFLOW_DURATION_MS,
+                cameraCatalogAffectsGroup -> tween<IntOffset>(
+                    durationMillis = CAMERA_CATALOG_REFLOW_DURATION_MS,
                     easing = FastOutSlowInEasing,
                 )
                 exportReflowActive -> tween<IntOffset>(
@@ -3592,14 +3660,14 @@ private fun ThumbnailGrid(
             ) {
                 Column(
                     modifier = Modifier.animateItem(
-                        fadeInSpec = if (cameraRemovalAffectsGroup) {
-                            tween(CAMERA_REMOVAL_ENTER_DURATION_MS, easing = FastOutSlowInEasing)
+                        fadeInSpec = if (cameraCatalogAffectsGroup) {
+                            tween(CAMERA_CATALOG_ENTER_DURATION_MS, easing = FastOutSlowInEasing)
                         } else {
                             null
                         },
                         placementSpec = placementSpec,
-                        fadeOutSpec = if (cameraRemovalAffectsGroup) {
-                            tween(CAMERA_REMOVAL_EXIT_DURATION_MS, easing = FastOutSlowInEasing)
+                        fadeOutSpec = if (cameraCatalogAffectsGroup) {
+                            tween(CAMERA_CATALOG_EXIT_DURATION_MS, easing = FastOutSlowInEasing)
                         } else {
                             null
                         },
@@ -3614,7 +3682,7 @@ private fun ThumbnailGrid(
                             // 日期与连拍都在改变同一网格布局，任一收合进行中都忽略再次点击，
                             // 防止两套高度动画同帧竞争。
                             if (collapsing == null && !burstAnimationBusy &&
-                                !cameraRemovalReflowActive
+                                !cameraCatalogReflowActive
                             ) {
                                 if (collapsed) {
                                     // 展开：瞬时重排 + 该组格子级联入场。
@@ -3624,13 +3692,20 @@ private fun ThumbnailGrid(
                                     recentlyExpanded = null
                                     toggleScope.launch {
                                         // 只保留当前可见的格子（+一行缓冲）参与收合动画。
-                                        val visibleKeys = gridState.layoutInfo.visibleItemsInfo
-                                            .mapTo(HashSet()) { it.key }
-                                        val lastVisible = groupItems.indexOfLast { it.key in visibleKeys }
-                                        if (lastVisible < 0) {
+                                        val visible = gridState.layoutInfo.visibleItemsInfo
+                                        val headerIndex = visible.firstOrNull {
+                                            it.key == "header_${group.date}"
+                                        }?.index
+                                        // Global lazy indices count each cell once, including spans.
+                                        // Inspect the visible window instead of scanning a large day.
+                                        val visibleCount = if (headerIndex == null) 0 else {
+                                            ((visible.maxOfOrNull { it.index } ?: headerIndex) - headerIndex)
+                                                .coerceIn(0, groupItems.size)
+                                        }
+                                        if (visibleCount == 0) {
                                             collapsedDates[group.date] = true
                                         } else {
-                                            collapsing = CollapsingGroup(group.date, lastVisible + 1 + columns)
+                                            collapsing = CollapsingGroup(group.date, visibleCount + columns)
                                             collapseProgress.snapTo(1f)
                                             collapseProgress.animateTo(0f, tween(300, easing = FastOutSlowInEasing))
                                             collapsedDates[group.date] = true
@@ -3673,9 +3748,9 @@ private fun ThumbnailGrid(
                                         BURST_MEMBER_ENTER_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
-                                } else if (cameraRemovalAffectsGroup) {
+                                } else if (cameraCatalogAffectsGroup) {
                                     tween(
-                                        CAMERA_REMOVAL_ENTER_DURATION_MS,
+                                        CAMERA_CATALOG_ENTER_DURATION_MS,
                                         easing = FastOutSlowInEasing,
                                     )
                                 } else {
@@ -3687,9 +3762,9 @@ private fun ThumbnailGrid(
                                         BURST_MEMBER_EXIT_DURATION_MS,
                                         easing = FastOutSlowInEasing
                                     )
-                                } else if (cameraRemovalAffectsGroup) {
+                                } else if (cameraCatalogAffectsGroup) {
                                     tween(
-                                        CAMERA_REMOVAL_EXIT_DURATION_MS,
+                                        CAMERA_CATALOG_EXIT_DURATION_MS,
                                         easing = FastOutSlowInEasing,
                                     )
                                 } else {
@@ -3708,12 +3783,13 @@ private fun ThumbnailGrid(
                     ) {
                         when (item) {
                             is ThumbnailGridItem.BurstCollection -> {
-                                val expanded = expandedBursts[item.id] == true
+                                val expanded = item.id in expandedBurstIds
                                 BurstCollectionCell(
                                     collectionId = item.id,
                                     files = item.files,
                                     expanded = expanded,
                                     transfersBusy = transfersBusy,
+                                    loadEnabled = !collapsingThis,
                                     allowRemoteThumbnails = allowRemoteThumbnails,
                                     cameraViewModel = cameraViewModel,
                                     onTransferGroup = onTransferGroup,
@@ -3721,11 +3797,11 @@ private fun ThumbnailGrid(
                                     onPreviewFirst = { rect ->
                                         onPreviewBurst(item.id, item.files, rect)
                                     },
-                                    onBoundsChanged = { bounds ->
-                                        if (bounds == null) burstBoundsRegistry.remove(item.id)
-                                        else burstBoundsRegistry[item.id] = bounds
+                                    onCoordinatesChanged = { coordinates ->
+                                        if (coordinates == null) burstBoundsRegistry.remove(item.id)
+                                        else burstBoundsRegistry[item.id] = coordinates
                                     },
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier.fillMaxSize().graphicsLayer { alpha = firstBatchAlpha() }
                                 )
                             }
                             is ThumbnailGridItem.Photo -> {
@@ -3752,13 +3828,15 @@ private fun ThumbnailGrid(
                                     themeBorderColor = thumbnailBorderColor,
                                     transfersBusy = transfersBusy,
                                     allowRemoteThumbnail = allowRemoteThumbnails,
+                                    loadEnabled = !collapsingThis,
                                     cameraViewModel = cameraViewModel,
                                     onTapFile = onTapFile,
                                     onPreview = onPreview,
                                     tapToPreview = tapToPreview,
                                     cellBoundsRegistry = cellBoundsRegistry,
+                                    entryAlpha = firstBatchAlpha,
                                     inBurst = file.handle in burstHandles,
-                                    animateBurstBadgeRemoval = cameraRemovalAffectsGroup,
+                                    animateBurstBadgeRemoval = cameraCatalogAffectsGroup,
                                     inExpandedBurstCollection =
                                         collapseBurstPhotos &&
                                             item.burstId != null &&
@@ -3766,7 +3844,11 @@ private fun ThumbnailGrid(
                                     // 连拍展开不参与缩放；这里只保留原有日期与筛选入场。
                                     reveal =
                                         group.date == recentlyExpanded || filterRevealWindow,
-                                    revealDelayMs = (index.coerceAtMost(18) * 15).toLong(),
+                                    // A few short row steps, not a long per-photo queue: cached
+                                    // dates respond immediately even with many visible columns.
+                                    revealDelayMs = if (group.date == recentlyExpanded)
+                                        ((index / columns.coerceIn(1, 4)).coerceAtMost(4) * 18).toLong()
+                                    else (index.coerceAtMost(18) * 15).toLong(),
                                     revealKey = filterRevealTick,
                                     exiting = file.handle in exitingExportHandles,
                                     returnFocusNonce = returnFocusNonce.takeIf {
@@ -3794,28 +3876,28 @@ private fun BurstCollectionCell(
     files: List<NikonCamera.FileInfo>,
     expanded: Boolean,
     transfersBusy: Boolean,
+    loadEnabled: Boolean,
     allowRemoteThumbnails: Boolean,
     cameraViewModel: CameraViewModel,
     onTransferGroup: (List<NikonCamera.FileInfo>, Rect?) -> Unit,
     onToggle: () -> Unit,
     onPreviewFirst: (Rect) -> Unit,
-    onBoundsChanged: (Rect?) -> Unit,
+    onCoordinatesChanged: (LayoutCoordinates?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = AppTheme.colors
     val a11y = stringResource(R.string.burst_collection_a11y, files.size)
-    // 两个坐标都只在点击/长按瞬间读取，使用普通容器避免列表滚动时的全局坐标变化
-    // 触发合集卡重组。合集 registry 同样是普通 Map，更新本身不使网格重组。
-    val plusBoundsRef = remember { arrayOfNulls<Rect>(1) }
-    val collectionBoundsRef = remember { arrayOfNulls<Rect>(1) }
+    // Store layout references; root bounds are needed only for a click/long press or queue flight.
+    val plusCoordinatesRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
+    val collectionCoordinatesRef = remember { arrayOfNulls<LayoutCoordinates>(1) }
     val latestOnPreviewFirst by rememberUpdatedState(onPreviewFirst)
-    val latestOnBoundsChanged by rememberUpdatedState(onBoundsChanged)
+    val latestOnCoordinatesChanged by rememberUpdatedState(onCoordinatesChanged)
     DisposableEffect(collectionId) {
         // LazyGrid 可复用同 contentType 的组合槽；以真实 id 为 key，复用到下一合集前
         // 先精确清掉旧 id 的坐标，避免普通 HashMap 留下不可见的历史项。
-        onDispose { onBoundsChanged(null) }
+        onDispose { onCoordinatesChanged(null) }
     }
-    val chevronRotation by animateFloatAsState(
+    val chevronRotation = animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(240, easing = FastOutSlowInEasing),
         label = "burstCollectionChevron"
@@ -3824,13 +3906,8 @@ private fun BurstCollectionCell(
     BoxWithConstraints(
         modifier = modifier
             .onGloballyPositioned {
-                if (it.isAttached) {
-                    val bounds = it.boundsInRoot()
-                    if (bounds.width > 0f && bounds.height > 0f) {
-                        collectionBoundsRef[0] = bounds
-                        latestOnBoundsChanged(bounds)
-                    }
-                }
+                collectionCoordinatesRef[0] = it
+                latestOnCoordinatesChanged(it)
             }
             .semantics { contentDescription = a11y }
     ) {
@@ -3856,8 +3933,8 @@ private fun BurstCollectionCell(
             // update the count without recomposing an identical old/new photo stack.
             contentKey = { current -> current.take(3).map { it.publishedIdentity() } },
             transitionSpec = {
-                fadeIn(tween(CAMERA_REMOVAL_ENTER_DURATION_MS)) togetherWith
-                    fadeOut(tween(CAMERA_REMOVAL_EXIT_DURATION_MS))
+                fadeIn(tween(CAMERA_CATALOG_ENTER_DURATION_MS)) togetherWith
+                    fadeOut(tween(CAMERA_CATALOG_EXIT_DURATION_MS))
             },
             contentAlignment = Alignment.Center,
             label = "burstCollectionFiles",
@@ -3886,6 +3963,7 @@ private fun BurstCollectionCell(
                         file = file,
                         cameraViewModel = cameraViewModel,
                         transfersBusy = transfersBusy,
+                        loadEnabled = loadEnabled,
                         allowRemoteThumbnail = allowRemoteThumbnails,
                         showPlaceholderIcon = index == last,
                         modifier = Modifier
@@ -3925,7 +4003,7 @@ private fun BurstCollectionCell(
                         onLongPress = {
                             // 长按只建立“合集 + 成员”的预览快照并直达第一张；底层列表不在
                             // 预览出现前重排，从而不会短暂闪出展开成员或箭头旋转。
-                            collectionBoundsRef[0]?.let { bounds ->
+                            collectionCoordinatesRef[0].validBoundsInRoot()?.let { bounds ->
                                 latestOnPreviewFirst(bounds)
                             }
                         }
@@ -3944,7 +4022,7 @@ private fun BurstCollectionCell(
         // 用户指定的位置：左下整组入队，右下展开/收起。按钮直接复用全局 GlassButton；
         // 只有在 4 列极窄格子下按比例缩小，避免两颗触点互相覆盖。
         GlassButton(
-            onClick = { onTransferGroup(files, plusBoundsRef[0]) },
+            onClick = { onTransferGroup(files, plusCoordinatesRef[0].validBoundsInRoot()) },
             enabled = files.isNotEmpty(),
             shape = CircleShape,
             contentPadding = PaddingValues(0.dp),
@@ -3954,14 +4032,7 @@ private fun BurstCollectionCell(
                 .offset(x = actionInset, y = -actionInset)
                 .size(actionSize)
                 .drawBehind { drawCircle(actionBacking) }
-                .onGloballyPositioned {
-                    if (it.isAttached) {
-                        val bounds = it.boundsInRoot()
-                        if (bounds.width > 0f && bounds.height > 0f) {
-                            plusBoundsRef[0] = bounds
-                        }
-                    }
-                }
+                .onGloballyPositioned { plusCoordinatesRef[0] = it }
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
@@ -3993,7 +4064,7 @@ private fun BurstCollectionCell(
                     tint = colors.accentBlue,
                     modifier = Modifier
                         .size(actionSize * 0.58f)
-                        .rotate(chevronRotation)
+                        .graphicsLayer { rotationZ = chevronRotation.value }
                 )
             }
         }
@@ -4016,30 +4087,24 @@ internal fun BurstStackPhoto(
     val borderColor = remember(skin, dark) {
         stackedThumbnailThemeBorderColor(skin, dark)
     }
-    var thumbnail by remember(file.handle) {
-        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
-    }
-    LaunchedEffect(file.handle, transfersBusy, loadEnabled, allowRemoteThumbnail) {
-        if (loadEnabled && thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
-        }
-    }
-    val shape = RoundedCornerShape(10.dp)
+    val thumbnail = rememberThumbnailImagePresentation(
+        handle = file.handle,
+        transfersBusy = transfersBusy,
+        loadEnabled = loadEnabled,
+        allowRemote = allowRemoteThumbnail,
+        cachedThumbnail = { cameraViewModel.cachedThumbnail(file.handle) },
+        loadThumbnail = { allowRemote -> cameraViewModel.loadThumbnail(file, allowRemote) },
+        thumbnailReadyEvents = cameraViewModel.thumbnailReadyEvents,
+    )
+    val cornerRadius = 10.dp
+    val shape = RoundedCornerShape(cornerRadius)
 
     Box(
         modifier = modifier
-            .clip(shape)
-            .background(colors.thumbPlaceholder)
+            .background(colors.thumbPlaceholder, shape)
             .border(THUMBNAIL_THEME_BORDER_WIDTH, borderColor, shape)
     ) {
-        thumbnail?.let { image ->
-            Image(
-                bitmap = image,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } ?: if (showPlaceholderIcon) {
+        if (showPlaceholderIcon && thumbnail.showPlaceholder.value) {
             Icon(
                 imageVector = if (file.extension == ".mov" || file.extension == ".mp4") {
                     Icons.Default.Movie
@@ -4052,8 +4117,14 @@ internal fun BurstStackPhoto(
                     .size(28.dp)
                     .align(Alignment.Center)
             )
-        } else {
-            Unit
+        }
+        thumbnail.image.value?.let { image ->
+            BurstStackImage(
+                image = image,
+                cornerRadius = cornerRadius,
+                opacity = thumbnail.alpha,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -4072,8 +4143,10 @@ private fun ThumbnailCell(
     onTapFile: (NikonCamera.FileInfo) -> Unit,
     onPreview: (NikonCamera.FileInfo, Rect) -> Unit,
     tapToPreview: Boolean,
-    cellBoundsRegistry: MutableMap<Int, Rect>,
+    cellBoundsRegistry: VisibleItemBoundsRegistry<Int>,
     modifier: Modifier = Modifier,
+    entryAlpha: () -> Float = { 1f },
+    loadEnabled: Boolean = true,
     inBurst: Boolean = false,
     animateBurstBadgeRemoval: Boolean = false,
     inExpandedBurstCollection: Boolean = false,
@@ -4112,26 +4185,24 @@ private fun ThumbnailCell(
             exitProgress.snapTo(1f)
         }
     }
-    // 已加载的缩略图按 handle 记住，transfersBusy 变化不会让它闪回占位。
-    var thumbnail by remember(file.handle) {
-        // 网格插入/移除大量连拍成员时，可见项可能离开再重新进入组合。直接从缓存恢复，
-        // 避免先画一帧占位图、下一帧再换回缩略图造成列表闪烁。
-        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
-    }
     // 传输中仍允许取图，远程请求排到分块间隙；大图打开后只读本地缓存，不再向相机
-    // 发 GetThumb。关闭大图时 allowRemoteThumbnail 变回 true，缺图格子自动恢复。
-    LaunchedEffect(file.handle, transfersBusy, allowRemoteThumbnail) {
-        if (thumbnail == null) {
-            thumbnail = cameraViewModel.loadThumbnail(file, allowRemoteThumbnail)
-        }
-    }
+    // 发 GetThumb。正在收起的日期也不再启动取图；展开或关闭大图后缺图格子自动恢复。
+    val thumbnail = rememberThumbnailImagePresentation(
+        handle = file.handle,
+        transfersBusy = transfersBusy,
+        loadEnabled = loadEnabled,
+        allowRemote = allowRemoteThumbnail,
+        cachedThumbnail = { cameraViewModel.cachedThumbnail(file.handle) },
+        loadThumbnail = { allowRemote -> cameraViewModel.loadThumbnail(file, allowRemote) },
+        thumbnailReadyEvents = cameraViewModel.thumbnailReadyEvents,
+    )
     DisposableEffect(file.handle, cellBoundsRegistry) {
         onDispose {
             cellBoundsRegistry.remove(file.handle)
         }
     }
-    LaunchedEffect(returnFocusNonce) {
-        if (returnFocusNonce != null) {
+    if (returnFocusNonce != null) {
+        LaunchedEffect(returnFocusNonce) {
             returnFocusPulse.snapTo(0f)
             repeat(2) {
                 returnFocusPulse.animateTo(1f, tween(110, easing = FastOutSlowInEasing))
@@ -4156,7 +4227,7 @@ private fun ThumbnailCell(
                 clip = true
                 val revealP = revealProgress.value
                 val exitP = exitProgress.value
-                alpha = (if (reveal) revealP else 1f) * exitP
+                alpha = entryAlpha() * (if (reveal) revealP else 1f) * exitP
                 // 只有明确处于日期/筛选 reveal 窗口的格子才允许缩放；普通网格重排
                 // 永远保持 1x，避免连拍展开让无关照片整体“缩一下再弹回”。
                 val revealScale = if (reveal) 0.94f + 0.06f * revealP else 1f
@@ -4173,14 +4244,8 @@ private fun ThumbnailCell(
                 shape = thumbnailShape,
             )
             .onGloballyPositioned {
-                // 同一份 bounds 双用:长按预览的放大起点 + 打包动画的灵魂起点。
-                // 只收有效样本：分离/复用瞬间的零矩形会让动画从屏幕外冒出。
-                if (it.isAttached) {
-                    val b = it.boundsInRoot()
-                    if (b.width > 0f && b.height > 0f) {
-                        cellBoundsRegistry[file.handle] = b
-                    }
-                }
+                // Bounds are resolved and validated at use, never cached at an old scroll position.
+                cellBoundsRegistry[file.handle] = it
             }
             // 只在这里交换两个既有动作的手势入口；传输校验、入队和预览逻辑保持单一来源。
             .combinedClickable(
@@ -4201,17 +4266,7 @@ private fun ThumbnailCell(
                 }
             )
     ) {
-        val image = thumbnail
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = file.fileName,
-                // 黑边已在解码时按实际黑条精确裁除（CameraViewModel.cropLetterbox），
-                // Crop 填满格子即为刚好，无需再放大遮边。
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
+        if (thumbnail.showPlaceholder.value) {
             // 占位：类型角标底色
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
@@ -4224,6 +4279,19 @@ private fun ThumbnailCell(
                     modifier = Modifier.size(28.dp)
                 )
             }
+        }
+        thumbnail.image.value?.let { image ->
+            Image(
+                bitmap = image,
+                contentDescription = file.fileName,
+                // 黑边已在解码时按实际黑条精确裁除（CameraViewModel.cropLetterbox），
+                // Crop 填满格子即为刚好，无需再放大遮边。
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().then(
+                    if (thumbnail.needsFadeLayer) Modifier.graphicsLayer { alpha = thumbnail.alpha.value }
+                    else Modifier
+                )
+            )
         }
 
         // 左上角类型角标
@@ -4256,12 +4324,12 @@ private fun ThumbnailCell(
         if (inBurst || animateBurstBadgeRemoval) {
             AnimatedVisibility(
                 visible = inBurst,
-                enter = fadeIn(tween(CAMERA_REMOVAL_ENTER_DURATION_MS)) + scaleIn(
-                    animationSpec = tween(CAMERA_REMOVAL_ENTER_DURATION_MS),
+                enter = fadeIn(tween(CAMERA_CATALOG_ENTER_DURATION_MS)) + scaleIn(
+                    animationSpec = tween(CAMERA_CATALOG_ENTER_DURATION_MS),
                     initialScale = 0.82f,
                 ),
-                exit = fadeOut(tween(CAMERA_REMOVAL_EXIT_DURATION_MS)) + scaleOut(
-                    animationSpec = tween(CAMERA_REMOVAL_EXIT_DURATION_MS),
+                exit = fadeOut(tween(CAMERA_CATALOG_EXIT_DURATION_MS)) + scaleOut(
+                    animationSpec = tween(CAMERA_CATALOG_EXIT_DURATION_MS),
                     targetScale = 0.82f,
                 ),
                 modifier = Modifier.align(Alignment.TopEnd),
@@ -4303,7 +4371,9 @@ private fun ThumbnailCell(
         val overlayTask = task?.takeIf { showsQueueStatusOverlay(it.status) }
         // lastTask 保留最后一次的任务，退场动画期间角标仍有内容可渲染。
         var lastTask by remember(file.handle) { mutableStateOf(overlayTask) }
-        LaunchedEffect(overlayTask) { if (overlayTask != null) lastTask = overlayTask }
+        if (overlayTask != null) {
+            LaunchedEffect(overlayTask) { lastTask = overlayTask }
+        }
         AnimatedVisibility(
             visible = overlayTask != null,
             enter = fadeIn(tween(150)),
@@ -4448,20 +4518,18 @@ internal fun ClassicUsbIcon(
 @Composable
 private fun LoadingMoreRow() {
     val colors = AppTheme.colors
-    Row(
+    val loadingDescription = stringResource(R.string.loading_more)
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(16.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
+        contentAlignment = Alignment.Center,
     ) {
         CircularProgressIndicator(
-            modifier = Modifier.size(20.dp),
+            modifier = Modifier.size(20.dp).semantics { contentDescription = loadingDescription },
             color = colors.accentBlue,
             strokeWidth = 2.dp
         )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(stringResource(R.string.loading_more), style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
     }
 }
 
@@ -4509,7 +4577,7 @@ internal fun toggleStorageSlotSelection(
 internal fun allowGridRemoteThumbnails(previewOpen: Boolean): Boolean = !previewOpen
 
 /**
- * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下同时展示开始、结束两组三波轮，
+ * 类型/标记/日期筛选浮层。主面板保持紧凑；日期页上下展示两组可独立选择的日期拨轮，
  * 编辑期间只改草稿，完成时才一次提交，避免滚动波轮时反复重排列表与后台请求。
  * 类型语义：勾"全部"= 不过滤（未来出现的新类型也放行）；点具体类型自动脱离"全部"；
  * 全不选或凑齐全部现有类型时自动归位"全部"（不允许空集）。
@@ -4523,9 +4591,9 @@ private fun FilterOverlay(
     ratingProgress: PhotoRatingScan,
     storageSlots: List<Int>,
     showProtectionFilter: Boolean,
-    suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
     onChange: (PhotoFilterCriteria, Boolean) -> Unit,
+    onReset: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val colors = AppTheme.colors
@@ -4544,6 +4612,8 @@ private fun FilterOverlay(
     val panelTop = with(density) { anchorBounds.bottom.toDp() } + 8.dp
     val panelStart = ((screenWidth - panelWidth) / 2f)
         .coerceAtLeast(FILTER_PANEL_SCREEN_MARGIN)
+    val panelMaxHeight = (LocalConfiguration.current.screenHeightDp.dp - panelTop - 20.dp)
+        .coerceAtLeast(100.dp)
 
     // 外部“一键清除”发生时同步丢弃面板草稿，不能让旧日期范围继续存活。
     var working by remember(current) { mutableStateOf(current) }
@@ -4591,23 +4661,25 @@ private fun FilterOverlay(
             },
             label = "filterDateEditor",
         ) { showDateEditor ->
+            // 每一页保留独立的滚动状态；矮屏下日期页也不能超出可用高度。
+            val pageModifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = panelMaxHeight)
+                .verticalScroll(rememberScrollState())
             if (showDateEditor) {
                 DateRangeEditor(
                     current = working.dateRange,
-                    suggestedDate = suggestedDate,
                     hapticsEnabled = hapticsEnabled,
                     onBack = { editingDate = false },
                     onApply = { range ->
                         commit(working.copy(dateRange = range))
                         editingDate = false
                     },
+                    modifier = pageModifier,
                 )
             } else {
                 Column(
-                    modifier = Modifier
-                        .heightIn(max = (LocalConfiguration.current.screenHeightDp.dp - panelTop - 20.dp).coerceAtLeast(100.dp))
-                        .verticalScroll(rememberScrollState())
-                        .padding(14.dp),
+                    modifier = pageModifier.padding(FILTER_PANEL_CONTENT_PADDING),
                 ) {
                     // ---- 类型：全部 + 各扩展名，短标签最多五列，保持原有多选语义 ----
                     val typeChips: List<Triple<String, Boolean, () -> Unit>> = buildList {
@@ -4621,9 +4693,9 @@ private fun FilterOverlay(
                         }
                     }
                     val typeColumnCount = minOf(5, typeChips.size.coerceAtLeast(1))
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                         typeChips.chunked(typeColumnCount).forEach { rowChips ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                                 rowChips.forEach { (label, selected, onClick) ->
                                     key(label) {
                                         AnimatedVisibility(
@@ -4646,7 +4718,7 @@ private fun FilterOverlay(
                     FilterSectionDivider()
 
                     // ---- 标记：保护 / 连拍 / 未传输（独立开关，与日期和类型叠加）----
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                         if (showProtectionFilter) {
                             FilterChip(
                                 label = stringResource(R.string.filter_protected),
@@ -4681,12 +4753,7 @@ private fun FilterOverlay(
                     if (storageSlots.isNotEmpty()) {
                         FilterSectionDivider()
 
-                        FilterSectionLabel(
-                            label = stringResource(R.string.filter_section_storage),
-                        )
-                        Spacer(Modifier.height(8.dp))
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
                             storageSlots.forEach { slot ->
                                 FilterChip(
                                     label = stringResource(R.string.filter_storage_slot, slot),
@@ -4730,7 +4797,7 @@ private fun FilterOverlay(
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP),
                     ) {
                         FilterChip(
                             label = when {
@@ -4747,7 +4814,7 @@ private fun FilterOverlay(
                                 ))
                             },
                             modifier = Modifier
-                                .width(81.dp)
+                                .weight(1f)
                                 .graphicsLayer {
                                     alpha = if (working.ratingEnabled && ratingProgress.loading) ratingAlpha else 1f
                                 },
@@ -4762,17 +4829,20 @@ private fun FilterOverlay(
                         Box(
                             // Keep the five stars at a fixed compact width. A weighted slot can
                             // become narrower on small screens and clip the last star.
-                            modifier = Modifier.width(154.dp).height(34.dp),
+                            modifier = Modifier
+                                .width(FILTER_RATING_CONTROLS_WIDTH)
+                                .height(FILTER_COMPACT_CONTROL_HEIGHT),
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             Crossfade(
                                 targetState = working.ratingEnabled,
                                 animationSpec = tween(180),
+                                modifier = Modifier.fillMaxSize(),
                                 label = "ratingControlsFade",
                             ) { enabled ->
                                 if (!enabled) {
                                     Row(
-                                        modifier = Modifier.height(34.dp),
+                                        modifier = Modifier.fillMaxSize(),
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -4792,29 +4862,26 @@ private fun FilterOverlay(
                                             onValueCommitted = { days -> commit(working.copy(ratingDays = days)) },
                                             onDetent = haptics::tick,
                                             label = stringResource(R.string.filter_rating_range_label),
-                                            wheelHeight = 34.dp,
+                                            wheelHeight = FILTER_COMPACT_CONTROL_HEIGHT,
                                             optionFontSize = 12.sp,
                                             optionFontWeight = FontWeight.Medium,
                                             cornerRadius = 10.dp,
                                             showDragHint = false,
-                                            // Match the compact status-chip width; the remaining
-                                            // slot is reserved for the help button and star row.
-                                            modifier = Modifier.width(81.dp),
+                                            // 与星级行右缘对齐，范围拨轮占满灯泡左侧余量。
+                                            modifier = Modifier.weight(1f),
                                         )
                                         TipLightbulbButton(
                                             onClick = { showRatingTip = true },
                                             contentDescription = stringResource(R.string.filter_rating_help_title),
                                             modifier = Modifier
-                                                .size(34.dp)
+                                                .size(FILTER_COMPACT_CONTROL_HEIGHT)
                                                 .onGloballyPositioned { ratingTipAnchor = it.boundsInRoot() },
                                         )
                                     }
                                 } else {
                                     val feedback = com.ztransfer.ui.util.rememberHaptics(hapticsEnabled)
                                     Row(
-                                        modifier = Modifier
-                                            .width(154.dp)
-                                            .height(34.dp),
+                                        modifier = Modifier.fillMaxSize(),
                                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
@@ -4842,7 +4909,10 @@ private fun FilterOverlay(
 
                     FilterSectionDivider()
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         FilterChip(
                             label = compactDateRangeLabel(working.dateRange)
                                 ?: stringResource(R.string.filter_date),
@@ -4857,6 +4927,21 @@ private fun FilterOverlay(
                             )
                         }
                     }
+
+                    FilterSectionDivider()
+
+                    FilterChip(
+                        label = stringResource(R.string.reset_filters),
+                        selected = false,
+                        onClick = {
+                            working = PhotoFilterCriteria.Default
+                            // Reset all persisted conditions, including hidden STA protection.
+                            // Normal edits preserve that preference; an explicit reset must not.
+                            onReset()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = Icons.Default.Refresh,
+                    )
                 }
             }
         }
@@ -4885,19 +4970,6 @@ private fun FilterOverlay(
 }
 
 @Composable
-private fun FilterSectionLabel(
-    label: String,
-) {
-    val colors = AppTheme.colors
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = colors.onSurfaceVariant,
-    )
-}
-
-@Composable
 private fun FilterSectionDivider() {
     val colors = AppTheme.colors
     Box(
@@ -4916,7 +4988,7 @@ private fun FilterClearButton(onClick: () -> Unit) {
         onClick = onClick,
         shape = RoundedCornerShape(9.dp),
         color = colors.surfaceVariant,
-        modifier = Modifier.size(38.dp),
+        modifier = Modifier.size(FILTER_COMPACT_CONTROL_HEIGHT),
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
@@ -4932,39 +5004,30 @@ private fun FilterClearButton(onClick: () -> Unit) {
 @Composable
 private fun DateRangeEditor(
     current: PhotoDateRange?,
-    suggestedDate: LocalDate?,
     hapticsEnabled: Boolean,
     onBack: () -> Unit,
     onApply: (PhotoDateRange?) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = AppTheme.colors
     val haptics = rememberHaptics(hapticsEnabled)
-    val initial = current?.endInclusive ?: suggestedDate ?: LocalDate.now()
-    // 编辑页进入时快照一次；文件列表仍在渐进加载时 suggestedDate 可能变化，不能把用户
-    // 已经拨到一半的草稿重置掉。
-    var start by remember { mutableStateOf(current?.start ?: initial) }
-    var end by remember { mutableStateOf(current?.endInclusive ?: initial) }
+    // 每次进入日期页时读取手机当地的今天；已有范围照常保留。
+    // 编辑期间只保留草稿，重组或照片加载不能重置用户已经拨动的日期。
+    val today = remember { LocalDate.now() }
+    // 已有范围按照片列表习惯呈现较新日期在上；编辑时不交换、不联动两个日期。
+    var upperDate by remember { mutableStateOf(current?.endInclusive ?: today) }
+    var lowerDate by remember { mutableStateOf(current?.start ?: today) }
 
-    fun updateStart(next: LocalDate) {
-        start = next
-        if (next.isAfter(end)) end = next
-    }
-
-    fun updateEnd(next: LocalDate) {
-        end = next
-        if (next.isBefore(start)) start = next
-    }
-
-    val minYear = minOf(1990, start.year, end.year)
-    val maxYear = maxOf(LocalDate.now().year + 1, start.year, end.year)
+    val minYear = minOf(1990, upperDate.year, lowerDate.year)
+    val maxYear = maxOf(today.year + 1, upperDate.year, lowerDate.year)
     val years = remember(minYear, maxYear) { (minYear..maxYear).toList() }
 
     Column(
-        modifier = Modifier.padding(14.dp),
+        modifier = modifier.padding(FILTER_PANEL_CONTENT_PADDING),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack, modifier = Modifier.size(34.dp)) {
+            IconButton(onClick = onBack, modifier = Modifier.size(FILTER_COMPACT_CONTROL_HEIGHT)) {
                 Icon(
                     Icons.Default.ArrowBack,
                     contentDescription = stringResource(R.string.cd_back),
@@ -4982,22 +5045,20 @@ private fun DateRangeEditor(
         }
 
         DateEndpointWheels(
-            label = stringResource(R.string.date_start),
-            date = start,
+            date = upperDate,
             years = years,
-            onDateChanged = ::updateStart,
+            onDateChanged = { upperDate = it },
             onDetent = haptics::tick,
         )
 
         DateEndpointWheels(
-            label = stringResource(R.string.date_end),
-            date = end,
+            date = lowerDate,
             years = years,
-            onDateChanged = ::updateEnd,
+            onDateChanged = { lowerDate = it },
             onDetent = haptics::tick,
         )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
             GlassButton(
                 onClick = { onApply(null) },
                 modifier = Modifier.weight(1f).height(40.dp),
@@ -5007,7 +5068,7 @@ private fun DateRangeEditor(
                 Text(stringResource(R.string.clear), color = colors.onSurfaceVariant)
             }
             GlassButton(
-                onClick = { onApply(PhotoDateRange.between(start, end)) },
+                onClick = { onApply(PhotoDateRange.between(upperDate, lowerDate)) },
                 modifier = Modifier.weight(1f).height(40.dp),
                 shape = RoundedCornerShape(11.dp),
                 active = true,
@@ -5025,67 +5086,46 @@ private fun DateRangeEditor(
 
 @Composable
 private fun DateEndpointWheels(
-    label: String,
     date: LocalDate,
     years: List<Int>,
     onDateChanged: (LocalDate) -> Unit,
     onDetent: () -> Unit,
 ) {
-    val colors = AppTheme.colors
     val months = remember { (1..12).toList() }
     val days = remember(date.year, date.monthValue) {
         (1..YearMonth.of(date.year, date.monthValue).lengthOfMonth()).toList()
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = colors.onBackground,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                formatLocalDate(date),
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.onSurfaceVariant,
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ReleaseCommitWheel(
-                options = years,
-                selected = date.year,
-                optionLabel = Int::toString,
-                onValueCommitted = { onDateChanged(date.withClampedDate(year = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.date_year),
-                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
-                modifier = Modifier.weight(1.3f),
-            )
-            ReleaseCommitWheel(
-                options = months,
-                selected = date.monthValue,
-                optionLabel = { it.toString().padStart(2, '0') },
-                onValueCommitted = { onDateChanged(date.withClampedDate(month = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.date_month),
-                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
-                modifier = Modifier.weight(1f),
-            )
-            ReleaseCommitWheel(
-                options = days,
-                selected = date.dayOfMonth,
-                optionLabel = { it.toString().padStart(2, '0') },
-                onValueCommitted = { onDateChanged(date.withClampedDate(day = it)) },
-                onDetent = onDetent,
-                label = stringResource(R.string.date_day),
-                wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
-                modifier = Modifier.weight(1f),
-            )
-        }
+    Row(horizontalArrangement = Arrangement.spacedBy(FILTER_CONTROL_GAP)) {
+        ReleaseCommitWheel(
+            options = years,
+            selected = date.year,
+            optionLabel = Int::toString,
+            onValueCommitted = { onDateChanged(date.withClampedDate(year = it)) },
+            onDetent = onDetent,
+            label = stringResource(R.string.date_year),
+            wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+            modifier = Modifier.weight(1.3f),
+        )
+        ReleaseCommitWheel(
+            options = months,
+            selected = date.monthValue,
+            optionLabel = { it.toString().padStart(2, '0') },
+            onValueCommitted = { onDateChanged(date.withClampedDate(month = it)) },
+            onDetent = onDetent,
+            label = stringResource(R.string.date_month),
+            wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+            modifier = Modifier.weight(1f),
+        )
+        ReleaseCommitWheel(
+            options = days,
+            selected = date.dayOfMonth,
+            optionLabel = { it.toString().padStart(2, '0') },
+            onValueCommitted = { onDateChanged(date.withClampedDate(day = it)) },
+            onDetent = onDetent,
+            label = stringResource(R.string.date_day),
+            wheelHeight = DATE_FILTER_WHEEL_HEIGHT,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
@@ -5097,11 +5137,6 @@ private fun LocalDate.withClampedDate(
     val clampedDay = day.coerceAtMost(YearMonth.of(year, month).lengthOfMonth())
     return LocalDate.of(year, month, clampedDay)
 }
-
-private fun formatLocalDate(date: LocalDate): String =
-    "${(date.year % 100).twoDigits()}/${date.monthValue.twoDigits()}/${date.dayOfMonth.twoDigits()}"
-
-private fun Int.twoDigits(): String = toString().padStart(2, '0')
 
 /**
  * 筛选与边框信息共用的紧凑选择项：复用拨轮材质，仅点击，选中颜色平滑过渡。

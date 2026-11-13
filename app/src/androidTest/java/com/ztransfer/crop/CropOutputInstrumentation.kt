@@ -12,6 +12,7 @@ import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.frame.*
 import kotlinx.coroutines.runBlocking
 import java.io.File
+import kotlin.math.abs
 
 /** The real SAF publisher and real photo-effects exporter share a disposable DocumentsProvider. */
 class CropOutputInstrumentation:Instrumentation() {
@@ -47,18 +48,37 @@ class CropOutputInstrumentation:Instrumentation() {
                 val cropped=File(scratch,"cropped.jpg")
                 val bitmap=Bitmap.createBitmap(640,480,Bitmap.Config.ARGB_8888).apply {eraseColor(Color.rgb(57,105,145))}
                 original.outputStream().use {check(bitmap.compress(Bitmap.CompressFormat.JPEG,94,it))};bitmap.recycle()
-                ExifInterface(original).apply {setAttribute(ExifInterface.TAG_ORIENTATION,"6");setAttribute(ExifInterface.TAG_MODEL,"NIKON Z 30");saveAttributes()}
+                ExifInterface(original).apply {
+                    setAttribute(ExifInterface.TAG_ORIENTATION,"6")
+                    setAttribute(ExifInterface.TAG_MODEL,"NIKON Z 30")
+                    setLatLong(-31.234567, -121.456789)
+                    setAltitude(-12.5)
+                    setAttribute(ExifInterface.TAG_GPS_DATESTAMP, "2026:10:24")
+                    setAttribute(ExifInterface.TAG_GPS_TIMESTAMP, "03:04:05")
+                    setAttribute(ExifInterface.TAG_GPS_PROCESSING_METHOD, "GPS")
+                    saveAttributes()
+                }
+                val expectedExif = ExifInterface(original)
                 val source=checkNotNull(LosslessJpeg.readSource(original))
                 LosslessJpeg.crop(original,cropped,JpegCropRecipe(source,CropRect(32,16,512,336)))
+                assertGpsPreserved(expectedExif, ExifInterface(cropped), "native crop")
                 // Production passes a private file URI to the existing effects exporter.
                 targetContext.contentResolver.openFileDescriptor(Uri.fromFile(cropped), "r")!!.use {
-                    check(ExifInterface(it.fileDescriptor).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) == 6)
+                    val exif = ExifInterface(it.fileDescriptor)
+                    check(exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) == 6)
+                    assertGpsPreserved(expectedExif, exif, "crop descriptor")
                 }
                 for(rename in listOf(false,true)) {
                     reset(rename)
                     val published=publishCropOutput(resolver,cropped,root,"crop.jpg",".nkcrop_fixture.part")
                     check(children(root).map {it.first}==listOf("crop.jpg"))
                     resolver.openInputStream(published)!!.use {check(it.readBytes().contentEquals(cropped.readBytes()))}
+                    resolver.openInputStream(published)!!.use {
+                        assertGpsPreserved(expectedExif, ExifInterface(it), "published renameRejected=$rename")
+                    }
+                    resolver.openFileDescriptor(published, "r")!!.use {
+                        assertGpsPreserved(expectedExif, ExifInterface(it.fileDescriptor), "published descriptor renameRejected=$rename")
+                    }
                 }
                 reset(rename=true,fail=true)
                 check(runCatching {publishCropOutput(resolver,cropped,root,"crop.jpg",".nkcrop_fixture.part")}.isFailure)
@@ -77,12 +97,35 @@ class CropOutputInstrumentation:Instrumentation() {
                 resolver.openInputStream(outputs.single().second)!!.use {BitmapFactory.decodeStream(it,null,dimensions)}
                 check(dimensions.outWidth>0&&dimensions.outHeight>0)
                 check(dimensions.outHeight>dimensions.outWidth) {"Crop EXIF portrait orientation was lost during effects"}
+                // No camera metadata fallback is supplied: this GPS must survive via the crop.
+                resolver.openInputStream(outputs.single().second)!!.use {
+                    assertGpsPreserved(expectedExif, ExifInterface(it), "effect generated from crop")
+                }
                 reset()
-                result.putString("result","PASS: one byte-identical crop output; rename fallback; failed-write cleanup; one effects output; portrait orientation")
+                result.putString("result","PASS: one byte-identical crop output; GPS coordinates/negative altitude/time through native crop, rename and copy fallback, descriptors and effects; failed-write cleanup; portrait orientation")
             }
             code=Activity.RESULT_OK
         } catch(failure:Throwable) {result.putString("failure",failure.stackTraceToString())}
         finally {scratch.deleteRecursively()}
         finish(code,result)
+    }
+
+    private fun assertGpsPreserved(expected: ExifInterface, actual: ExifInterface, label: String) {
+        val expectedCoordinates = checkNotNull(expected.latLong) { "Fixture GPS missing: $label" }
+        val actualCoordinates = checkNotNull(actual.latLong) { "Output GPS missing: $label" }
+        for (axis in expectedCoordinates.indices) {
+            check(abs(expectedCoordinates[axis] - actualCoordinates[axis]) <= 1e-8) { "GPS coordinate changed: $label axis=$axis" }
+        }
+        val altitude = expected.getAltitude(Double.NaN)
+        check(altitude.isFinite() && altitude < 0.0) { "Fixture negative altitude missing: $label" }
+        check(abs(altitude - actual.getAltitude(Double.NaN)) <= 1e-8) { "GPS altitude changed: $label" }
+        for (tag in listOf(
+            ExifInterface.TAG_GPS_LATITUDE_REF, ExifInterface.TAG_GPS_LONGITUDE_REF,
+            ExifInterface.TAG_GPS_ALTITUDE_REF, ExifInterface.TAG_GPS_DATESTAMP,
+            ExifInterface.TAG_GPS_TIMESTAMP, ExifInterface.TAG_GPS_PROCESSING_METHOD,
+        )) {
+            val value = checkNotNull(expected.getAttribute(tag)) { "Fixture $tag missing: $label" }
+            check(actual.getAttribute(tag) == value) { "$tag changed: $label" }
+        }
     }
 }

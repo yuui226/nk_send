@@ -46,7 +46,7 @@ internal fun Modifier.queueCardSwipe(
         .graphicsLayer { translationX = offset }
         .semantics {
             if (enabled) customActions = listOf(CustomAccessibilityAction(removeLabel) {
-                latestRemove(); true
+                if (latestEnabled) { latestRemove(); true } else false
             })
         }
         .pointerInput(enabled) {

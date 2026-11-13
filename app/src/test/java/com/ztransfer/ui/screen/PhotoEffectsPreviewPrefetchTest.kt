@@ -2,11 +2,25 @@ package com.ztransfer.ui.screen
 
 import com.ztransfer.filter.NcpPhotoFilterParameters
 import com.ztransfer.filter.PhotoFilterPreset
+import com.ztransfer.filter.LutAdjustments
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhotoEffectsPreviewPrefetchTest {
+    @Test fun prefetchedFilterUsesItsOwnRememberedFinishingControls() {
+        val controls = LutAdjustments(18, -26, 34, -42)
+        val next = nextPhotoFilterSelections(
+            filters = (1..3).map(::filter), favoriteCatalogKeys = emptyList(),
+            rememberedIntensities = emptyMap(), selectedId = "filter-1", enabled = true,
+            rememberedAdjustments = mapOf("filter-1" to LutAdjustments(-10), "filter-2" to controls),
+        )
+        assertEquals(listOf(controls, LutAdjustments()), next.map { it.lutAdjustments })
+        assertEquals(controls, PhotoEffectsPreviewCacheKey.from(next.first()).let {
+            LutAdjustments(it.contrast, it.saturation, it.highlights, it.shadows)
+        })
+    }
+
     @Test
     fun prefetchesOnlyTheNextTwoFiltersWithTheirRememberedIntensities() {
         val filters = (1..5).map(::filter)

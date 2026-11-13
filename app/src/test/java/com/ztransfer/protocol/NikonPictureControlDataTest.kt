@@ -50,6 +50,40 @@ class NikonPictureControlDataTest {
         assertEquals(100, NikonPictureControlSelection.parse(movie.bytes, 0xD237).current)
     }
 
+    @Test fun unusedCustomSlotsUseTheZeroBaseMarkerAndPreserveOtherUndefinedBytes() {
+        for (slot in 201..209) for (size in listOf(36, 614)) for (fill in listOf(0, 0xFF)) {
+            val source = ByteArray(size) { fill.toByte() }.also { it[0] = 0; it[1] = 0 }
+            val parsed = NikonPictureControlData.parseResponse(slot, 0x2001, source)
+            assertTrue("C${slot - 200} size=$size fill=$fill", parsed.isEmpty)
+            assertEquals(slot, parsed.requestedItem)
+            assertEquals(0, parsed.baseItem)
+            assertEquals("", parsed.name)
+            assertNull(parsed.curve)
+            assertArrayEquals(source, parsed.bytes())
+            val preserved = source.copyOf()
+            source.fill(1)
+            parsed.bytes().fill(2)
+            assertArrayEquals(preserved, parsed.bytes())
+        }
+    }
+
+    @Test fun aZeroBaseCannotMakeSystemItemsOrMalformedDatasetLengthsIntoEmptySlots() {
+        for (item in listOf(1, 100, 200, 210)) for (size in listOf(36, 614)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                NikonPictureControlData.parseResponse(item, 0x2001, ByteArray(size))
+            }
+        }
+        for (size in listOf(0, 2, 31, 32, 35, 37, 610, 613, 615)) {
+            assertThrows(IllegalArgumentException::class.java) {
+                NikonPictureControlData.parseResponse(209, 0x2001, ByteArray(size))
+            }
+        }
+        val nonzeroBase = data(201).bytes().also { it[0] = 0; it[1] = 1 }
+        val parsed = NikonPictureControlData.parseResponse(201, 0x2001, nonzeroBase)
+        assertFalse(parsed.isEmpty)
+        assertEquals(256, parsed.baseItem)
+    }
+
     @Test fun fullCurvesIncludeControlPointsAnd257SamplesWithoutTruncation() {
         val expectedPoints = mapOf(203 to 2, 204 to 7, 205 to 10)
         for ((slot, points) in expectedPoints) {
@@ -76,7 +110,6 @@ class NikonPictureControlDataTest {
         }
         assertThrows(IllegalArgumentException::class.java) { NikonPictureControlData.parseResponse(209, 0x2001, null) }
         assertThrows(IllegalArgumentException::class.java) { NikonPictureControlData.parseResponse(209, 0x2001, byteArrayOf()) }
-        assertThrows(IllegalArgumentException::class.java) { NikonPictureControlData.parseResponse(209, 0x2001, ByteArray(614)) }
         val curve = data(203).bytes()
         for (length in listOf(0, 35, 36, 37, 613, 615)) {
             assertThrows(IllegalArgumentException::class.java) {

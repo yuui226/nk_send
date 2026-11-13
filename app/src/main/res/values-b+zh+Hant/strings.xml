@@ -14,12 +14,13 @@
     <string name="sta_reset_pairing_message">將忘記此 App 已配對的所有相機，之後需要在相機中重新建立「連接至電腦」設定檔並重新配對。</string>
     <string name="sta_status_searching">正在尋找</string>
     <string name="sta_status_pairing">正在配對</string>
+    <string name="sta_pairing_incomplete">配對未完成，請檢查相機後重試。</string>
     <string name="sta_status_connecting">正在連線</string>
     <string name="sta_status_connected">連線成功</string>
-    <string name="sta_camera_not_found_short">找不到相機</string>
+    <string name="sta_camera_check_photos">記憶卡內可能沒有相片。</string>
     <string name="sta_camera_not_found">找不到相容相機，請檢查相機的網路設定與連線狀態。</string>
     <string name="sta_camera_no_media">相機記憶卡內未偵測到相片或影片，請先拍攝內容後重試。</string>
-    <string name="sta_camera_refused_repair">相機拒絕連線，請重新配對。</string>
+    <string name="sta_camera_refused_repair">相機拒絕連線，請在相機上建立新的網路設定檔並重新配對。</string>
     <string name="sta_camera_refused_retrying">相機尚未就緒，請保持開機，稍後將自動重新連線。</string>
     <string name="sta_signal_connected">STA 相機已連線</string>
     <string name="sta_signal_disconnected_reconnect">STA 相機已斷線，點擊重新連線。</string>
@@ -58,6 +59,7 @@
     <string name="tip_body">可將「Wi-Fi 連線」加入相機的 i 選單，之後按 i 鍵即可快速開啟。</string>
     <string name="tip_path">選單 → 自訂設定選單 → 控制 → 自訂 i 選單 → 選個順手的格子 → Wi-Fi 連線</string>
     <string name="tip_sta_title">STA 連線指引</string>
+    <string name="tip_sta_no_mobile_data">傳送照片不消耗行動數據。</string>
     <string name="tip_sta_first_connection">首次連線</string>
     <string name="tip_sta_quick_start">從 i 選單開啟「Wi-Fi 連線」</string>
     <string name="tip_sta_step_hotspot">1. 手機：開英文名熱點（建議 5 GHz</string>
@@ -78,6 +80,7 @@
     <string name="return_again_to_exit">再次返回離開</string>
     <string name="no_photos_match_filter">沒有符合篩選的照片</string>
     <string name="clear_filters">清除篩選</string>
+    <string name="reset_filters">重設篩選</string>
     <string name="loading_more">正在載入更多…</string>
     <string name="unknown_date">未知日期</string>
     <string name="filter_all">全部</string>
@@ -88,13 +91,10 @@
     <string name="filter_title">篩選</string>
     <string name="filter_section_file_type">檔案類型</string>
     <string name="filter_section_status">狀態</string>
-    <string name="filter_section_storage">記憶卡</string>
     <string name="filter_section_date">拍攝日期</string>
     <string name="filter_date">日期</string>
     <string name="filter_storage_slot">卡 %1$d</string>
     <string name="date_range">日期範圍</string>
-    <string name="date_start">開始</string>
-    <string name="date_end">結束</string>
     <string name="date_year">年</string>
     <string name="date_month">月</string>
     <string name="date_day">日</string>
@@ -112,6 +112,11 @@
     <!-- 傳輸佇列 -->
     <string name="status_waiting">等待</string>
     <string name="queue_pill_generating">產生中</string>
+    <string name="queue_focus_waiting_transfer">等待傳輸</string>
+    <string name="queue_summary_idle">閒置</string>
+    <string name="queue_summary_paused">已暫停</string>
+    <string name="queue_summary_download_remaining">剩餘傳輸 %1$d 項</string>
+    <string name="queue_summary_generation_remaining">剩餘產生 %1$d 項</string>
     <string name="status_generation_duration">產生 %1$s</string>
     <string name="status_skipped">跳過</string>
     <string name="status_cancelled">已取消</string>
@@ -126,7 +131,7 @@
     <string name="retry_failed_title">重試失敗任務？</string>
     <string name="cd_clear_queue">清空佇列</string>
     <string name="clear_queue_title">清空佇列？</string>
-    <string name="clear_queue_subtitle">移除全部卡片；正在傳輸的不受影響</string>
+    <string name="clear_queue_subtitle">保留正在傳輸及已進入生成佇列的卡片</string>
 
     <!-- 設定 -->
     <string name="settings">設定</string>
@@ -264,17 +269,19 @@
     <string name="photo_frame_effect_shadow">陰影</string>
     <string name="photo_frame_effect_outline">描邊</string>
     <string name="photo_filter">照片濾鏡</string>
-    <string name="photo_effects">濾鏡·LUT·邊框·浮水印</string>
-    <string name="photo_effects_editor_title">效果</string>
+    <string name="photo_effects">照片效果</string>
+    <string name="photo_effects_editor_title">照片效果</string>
     <string name="photo_effects_open_editor">編輯照片效果</string>
     <string name="photo_effects_info_title">照片效果說明</string>
     <string name="photo_effects_info_description">僅處理 JPG/JPEG，保留原圖，效果圖另存；RAW 和影片不生效。調整用於後續加入佇列的照片。</string>
-    <string name="photo_effects_gesture_hint">點擊放大，雙擊旋轉；長按對比調色前後。</string>
+    <string name="photo_effects_gesture_hint">點擊放大，雙擊旋轉；長按對比調色與顆粒效果。</string>
     <string name="photo_effects_wheel_hint">上下拖動快速調整，也可點按切換。</string>
     <string name="photo_effects_full_chooser_hint">長按濾鏡撥輪可按分類選擇</string>
     <string name="photo_filter_off_option">無濾鏡</string>
     <string name="photo_filter_intensity_summary">%1$d%%</string>
     <string name="photo_filter_intensity">強度</string>
+    <string name="photo_filter_settings">調整效果</string>
+    <string name="photo_color_reset">恢復預設值</string>
     <string name="photo_filter_task_label">濾鏡：%1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">收藏目前效果</string>
     <string name="photo_effect_favorite_remove">取消收藏目前效果</string>
@@ -332,7 +339,7 @@
 
     <!-- 傳輸錯誤 -->
     <string name="error_dir_invalid">傳輸目錄已失效，請重新選擇</string>
-    <string name="error_camera_connection_lost">相機連線中斷，重連後重試可續傳</string>
+    <string name="error_camera_connection_lost">相機連線中斷，重連後重試</string>
     <string name="error_camera_metadata_unavailable">無法讀取相機照片資訊，請重試</string>
     <string name="error_create_file">無法建立檔案</string>
     <string name="error_open_file">無法開啟檔案</string>
@@ -496,7 +503,7 @@
     <string name="purchase_open_link">開啟支付頁面</string>
     <string name="purchase_qr_expired">付款已逾時</string>
     <string name="purchase_qr_refresh">重新發起付款</string>
-    <string name="renewal_needed">高級版授權已過期，請連接網路後重開 App 自動續期。</string>
+    <string name="renewal_needed">無網路</string>
     <!-- 訂閱到期（設定頁續費入口/彈窗 + 連接頁臨期標籤） -->
     <string name="sub_expires_on">%1$s 到期</string>
     <string name="renew_action">續費</string>
@@ -557,10 +564,10 @@
     <string name="update_manual_copied">請手動更新，已複製到剪貼簿</string>
     <string name="update_failure_manual">%1$s，%2$s</string>
     <string name="update_open_download_page">開啟下載頁</string>
-    <string name="local_photo_effects_entry">濾鏡·LUT·邊框·浮水印</string>
+    <string name="local_photo_effects_entry">照片效果</string>
     <string name="local_photo_effects_info_description">可多選照片，共用目前效果，效果圖另存。</string>
     <string name="local_photo_effects_exif_hint">邊框：截圖等無 EXIF 的圖片不顯示拍攝參數</string>
-    <string name="local_photo_effects_gesture_hint">點擊放大，左右滑動換圖；長按對比調色前後。</string>
+    <string name="local_photo_effects_gesture_hint">點擊放大，左右滑動換圖；長按對比調色與顆粒效果。</string>
     <string name="local_photo_multi_select">（可多選）</string>
     <string name="local_photo_reselect">重新選擇（%1$d）</string>
     <string name="local_photo_batch_generating">產生中</string>
@@ -587,7 +594,8 @@
     <string name="gps_place_loading">正在查詢地點…</string>
     <string name="gps_place_unavailable">暫時無法取得地點名稱，請稍後重試</string>
     <string name="gps_altitude_value">海拔：%1$d 公尺</string>
-    <string name="gps_update_frequency_label">頻率</string>
+    <string name="gps_update_frequency_label">更新頻率</string>
+    <string name="gps_sync_now">立即同步</string>
     <string name="gps_frequency_30_seconds">30 秒</string>
     <string name="gps_frequency_1_minute">1 分鐘</string>
     <string name="gps_frequency_2_minutes">2 分鐘</string>
@@ -679,6 +687,11 @@
     <string name="photo_effect_module_watermark">浮水印</string>
 
     <string name="remote_tool_focus_frame">對焦框</string>
+    <string name="remote_tool_self_timer">延時拍照</string>
+    <string name="remote_self_timer_seconds">%1$d秒</string>
+    <string name="remote_self_timer_focus_failed">未合焦，請重試</string>
+    <string name="remote_self_timer_capture_failed">拍攝失敗，請重試</string>
+    <string name="monitor_help_tool_self_timer">開啟後，按快門並放開開始倒數，再按取消。結束後對焦拍照；手動對焦時保持原樣。僅照片模式可用。</string>
     <string name="remote_focus_diagnostic_start">開始採樣</string>
     <string name="remote_focus_diagnostic_stop">停止</string>
     <string name="remote_focus_diagnostic_mark">標記步驟</string>
@@ -692,13 +705,13 @@
     <string name="photo_lut_highlights">高光</string>
     <string name="photo_lut_shadows">陰影</string>
     <string name="photo_lut_concentration">濃度</string>
-    <string name="photo_lut_settings">LUT設定</string>
+    <string name="photo_lut_settings">調整效果</string>
     <string name="filter_rating_stars">%1$d 顆星</string>
     <string name="filter_rating_enabled">評級篩選</string>
     <string name="filter_rating_help_title">評級篩選</string>
     <string name="filter_rating_range_all">全部</string>
     <string name="filter_rating_range_days">%1$d日</string>
-    <string name="filter_rating_range_label">範圍</string>
+    <string name="filter_rating_range_label">評級載入範圍</string>
     <string name="filter_rating_waiting">等待中</string>
     <string name="filter_rating_help_description">開啟會載入範圍內的評級資料，實現按評級篩選功能。重新開啟可重新載入最新評級資料。</string>
     <string name="filter_rating_off">關閉</string>
@@ -707,4 +720,12 @@
     <string name="remote_review_empty">暫無照片</string>
     <string name="remote_review_retry">載入失敗 · 重試</string>
     <string name="remote_review_disconnected">相機已中斷連線</string>
+    <string name="photo_grain">膠片顆粒</string>
+    <string name="photo_grain_fine">細顆粒</string>
+    <string name="photo_grain_medium">中顆粒</string>
+    <string name="photo_grain_coarse">粗顆粒</string>
+    <string name="photo_grain_intensity_summary">%1$s %2$d%%</string>
+    <string name="photo_grain_hint">選擇顆粒粗細，再調整強度；各檔強度分別儲存。</string>
+    <string name="remote_review_follow">跟隨最新</string>
+    <string name="remote_review_follow_on">自動顯示新照片</string>
 </resources>

@@ -3,6 +3,7 @@ package com.ztransfer.viewmodel
 import android.content.SharedPreferences
 import com.ztransfer.protocol.STA_PAIRING_MARKER_PREFIX
 import com.ztransfer.protocol.StaInitiatorIdentity
+import com.ztransfer.protocol.staPairingStateLock
 
 /**
  * One ZTransfer installation is one PTP/IP initiator. Cameras remember that shared computer
@@ -140,7 +141,7 @@ internal class StaCameraProfileStore(
      * the next pairing. The wireless-mode preference is intentionally retained.
      */
     @Synchronized
-    fun resetPairing() {
+    fun resetPairing(): Unit = synchronized(staPairingStateLock) {
         val connectionEditor = preferences.edit()
             .remove(KEY_REUSABLE_PROFILE)
             .remove(KEY_LAST_CAMERA_IP)

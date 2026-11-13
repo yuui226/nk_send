@@ -41,8 +41,8 @@ android {
         applicationId = "com.ztransfer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 71
-        versionName = "1.98"
+        versionCode = 80
+        versionName = "2.07"
         // Keep the default explicit: AGP otherwise rewrites the first manifest entry when several
         // standalone instrumentation suites are registered.
         testInstrumentationRunner = "com.ztransfer.frame.FramePlaceLayoutInstrumentation"
@@ -107,6 +107,12 @@ android {
     }
 }
 
+// KGP marks its incremental switch as internal. Track it explicitly so switching it off
+// also invalidates old task outputs/cache entries on the very next build.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    inputs.property("kotlinIncrementalEnabled", providers.gradleProperty("kotlin.incremental").orElse("true"))
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
@@ -125,7 +131,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.6.2")
-    implementation("androidx.exifinterface:exifinterface:1.3.7")
+    // 1.4 fixes exposure-time precision loss when copying EXIF rational values.
+    implementation("androidx.exifinterface:exifinterface:1.4.2")
 
     // 二维码生成:把虎皮椒手机端支付链接画成码,自己排版 + 存相册,不塞它的页面。
     // 只用 core（纯 Java 编码器,约 500KB,不含安卓摄像头扫码那套）。

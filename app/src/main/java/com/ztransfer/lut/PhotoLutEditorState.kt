@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 /** Photo editor draft. File parsing and snapshot IO use the same bounded queue as monitor LUT. */
 @Stable
 internal class PhotoLutEditorState(
+    val role: String,
     val store: PhotoLutStore,
     private val source: LutSource,
     private val scope: CoroutineScope,
@@ -23,9 +24,10 @@ internal class PhotoLutEditorState(
     private val onSelected: () -> Unit,
     private val notice: (Int) -> Unit,
 ) {
-    var selection by mutableStateOf(initial); private set
+    init { requirePhotoLutRole(role) }
+    var selection by mutableStateOf(initial.takeIf { store.isSelectionCurrent(role, it, initialUri) }); private set
     var pendingUri by mutableStateOf<Uri?>(null); private set
-    var selectedUri by mutableStateOf(initialUri?.let(Uri::parse)); private set
+    var selectedUri by mutableStateOf(initialUri?.let(Uri::parse).takeIf { selection != null }); private set
     var files by mutableStateOf<List<LutFile>>(emptyList()); private set
     var folder by mutableStateOf(store.folders.folder); private set
     var failure by mutableStateOf<LutFolderFailure?>(null); private set
@@ -35,36 +37,58 @@ internal class PhotoLutEditorState(
     private var ticket: PresetIoTicket? = null
     private var timer: Job? = null
     private var generation = 0L
+    private var folderRevision = store.folderRevision
     private var disposed = false
+    private val folderObserver = store.observeFolderChanges { synchronizeFolder() }
+
+    private fun synchronizeFolder() {
+        if (disposed) return
+        val current = store.folders.folder
+        val currentRevision = store.folderRevision
+        if (current == folder && currentRevision == folderRevision) return
+        off()
+        folder = current
+        folderRevision = currentRevision
+        files = emptyList()
+        favorites = store.favorites()
+        failure = null
+    }
 
     fun reset(value: PhotoFilterSelection?, uri: String?) {
-        cancel(); selection = value; selectedUri = uri?.let(Uri::parse)
+        synchronizeFolder()
+        cancel()
+        selection = value.takeIf { store.isSelectionCurrent(role, it, uri) }
+        selectedUri = uri?.let(Uri::parse).takeIf { selection != null }
     }
     fun cancelPending() { cancel() }
     fun off() { cancel(); selection = null; selectedUri = null }
     fun strength(value: Int) {
+        synchronizeFolder()
         selection = selection?.copy(intensityPercent = value)
-        selection?.preset?.id?.removePrefix("cube:")?.takeIf { it.matches(Regex("[a-f0-9]{64}")) }
-            ?.let { digest -> store.rememberIntensity(digest, selectedUri?.toString(), value) }
-            ?: selectedUri?.let { store.rememberIntensity(it.toString(), value) }
+        selection?.preset?.id?.removePrefix("cube:")?.takeIf(PHOTO_LUT_DIGEST_PATTERN::matches)
+            ?.let { digest -> store.rememberIntensity(role, digest, selectedUri?.toString(), value) }
     }
     fun adjustments(value: LutAdjustments) {
+        synchronizeFolder()
         val current = selection ?: return
         val normalized = value.normalized()
         selection = current.copy(lutAdjustments = normalized)
-        current.preset.id.removePrefix("cube:").takeIf { it.matches(Regex("[a-f0-9]{64}")) }
-            ?.let { store.rememberAdjustments(it, normalized) }
+        current.preset.id.removePrefix("cube:").takeIf(PHOTO_LUT_DIGEST_PATTERN::matches)
+            ?.let { store.rememberAdjustments(role, it, normalized) }
     }
     fun favorite() {
+        synchronizeFolder()
         selectedUri?.let { store.toggleFavorite(it.toString()); favorites = store.favorites() }
     }
     fun refresh() {
+        synchronizeFolder()
         favorites = store.favorites()
         folder = store.folders.folder
         folder?.let { scan(it, false) }
     }
     fun folderPicked(uri: Uri) = scan(uri, true)
     fun choose(uri: Uri?) {
+        synchronizeFolder()
         if (uri == null) { off(); return }
         val file = files.find { it.uri == uri } ?: return
         val id = begin()
@@ -73,7 +97,7 @@ internal class PhotoLutEditorState(
         ticket = PresetIoQueue.submit({ signal ->
             val table = source.read(file, signal)
             signal.throwIfCanceled()
-            store.snapshot(file, table)
+            store.snapshot(role, file, table)
         }) { result ->
             if (!valid(id)) return@submit
             finish()
@@ -136,5 +160,5 @@ internal class PhotoLutEditorState(
     private fun valid(id: Long) = !disposed && generation == id
     private fun finish() { timer?.cancel(); timer = null; ticket = null; loading = false; loadingSelection = false; pendingUri = null }
     private fun cancel() { generation++; ticket?.cancel(); ticket = null; finish() }
-    fun close() { disposed = true; cancel() }
+    fun close() { disposed = true; folderObserver.close(); cancel() }
 }

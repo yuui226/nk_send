@@ -37,11 +37,11 @@ class PhotoFrameMetadataSettingsTest {
             val original = defaultPhotoFrameMetadataSettings(preset)
             val blur = original.copy(backgroundBlurPercent = 30)
             val mask = original.copy(backgroundMaskPercent = 30)
-            val name = photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = original)
-            assertTrue(name != photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur))
-            assertTrue(name != photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
-            assertTrue(photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur) !=
-                photoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
+            val name = legacyPhotoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = original)
+            assertTrue(name != legacyPhotoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur))
+            assertTrue(name != legacyPhotoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
+            assertTrue(legacyPhotoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = blur) !=
+                legacyPhotoFrameOutputName("DSC_0001.JPG", preset, metadataSettings = mask))
             assertEquals(original.requiresCameraMetadata, blur.requiresCameraMetadata)
             assertEquals(original.requiresCameraMetadata, mask.requiresCameraMetadata)
         }
@@ -334,8 +334,8 @@ class PhotoFrameMetadataSettingsTest {
         val custom = defaultPhotoFrameMetadataSettings(PhotoFramePreset.MIST).copy(
             showModel = false,
         )
-        val defaultName = photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, watermark)
-        val customName = photoFrameOutputName(
+        val defaultName = legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST, watermark)
+        val customName = legacyPhotoFrameOutputName(
             "DSC.JPG",
             PhotoFramePreset.MIST,
             watermark,
@@ -343,13 +343,13 @@ class PhotoFrameMetadataSettingsTest {
         )
         assertTrue(defaultName != customName)
 
-        val watermarkOnlyDefault = photoFrameOutputName(
+        val watermarkOnlyDefault = legacyPhotoFrameOutputName(
             "DSC.JPG",
             PhotoFramePreset.MIST,
             watermark,
             borderEnabled = false,
         )
-        val watermarkOnlyCustom = photoFrameOutputName(
+        val watermarkOnlyCustom = legacyPhotoFrameOutputName(
             "DSC.JPG",
             PhotoFramePreset.MIST,
             watermark,
@@ -368,8 +368,8 @@ class PhotoFrameMetadataSettingsTest {
         )
 
         assertEquals(
-            photoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST),
-            photoFrameOutputName(
+            legacyPhotoFrameOutputName("DSC.JPG", PhotoFramePreset.MIST),
+            legacyPhotoFrameOutputName(
                 "DSC.JPG",
                 PhotoFramePreset.MIST,
                 metadataSettings = hiddenCustomFormats,

@@ -16,7 +16,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -27,7 +26,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,9 +44,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ztransfer.R
 import com.ztransfer.effects.FavoriteFrameWatermarkEffect
-import com.ztransfer.effects.FavoritePhotoFilter
 import com.ztransfer.filter.PhotoFilterSelection
-import com.ztransfer.filter.BuiltInPhotoFilters
+import com.ztransfer.effects.photoFilterAdjustmentsFor
+import com.ztransfer.filter.photoFilterCatalogKey
+import com.ztransfer.filter.DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
 import com.ztransfer.frame.PhotoFrameWatermark
 import com.ztransfer.frame.PhotoFrameWatermarkContent
 import com.ztransfer.frame.defaultPhotoFrameMetadataSettings
@@ -69,7 +68,9 @@ import kotlinx.coroutines.delay
 fun LocalPhotoEffectsPage(
     viewModel: TransferViewModel,
     onNavigateUp: () -> Unit,
+    active: () -> Boolean = { true },
 ) {
+    val pageActive = active()
     val state by viewModel.state.collectAsState()
     val isPro by LicenseManager.isPro.collectAsState()
     val colors = AppTheme.colors
@@ -112,19 +113,19 @@ fun LocalPhotoEffectsPage(
 
     var watermarkDraft by remember { mutableStateOf(initialSettings.watermark) }
     var filterId by remember { mutableStateOf(initialSettings.filterId) }
+    var grain by remember { mutableStateOf(initialSettings.grain) }
+    var grainIntensities by remember { mutableStateOf(initialSettings.grainIntensities) }
     val initialLut = remember { com.ztransfer.lut.PhotoLutStore(context).restore("local") }
     var filterEnabled by remember { mutableStateOf(initialSettings.filterEnabled && initialLut == null) }
     var filterIntensity by remember {
         mutableIntStateOf(initialSettings.filterIntensityPercent)
     }
     var filterIntensities by remember { mutableStateOf(initialSettings.filterIntensities) }
-    var favoritePhotoFilters by remember {
-        mutableStateOf(initialSettings.favoritePhotoFilters)
-    }
+    var filterAdjustments by remember { mutableStateOf(initialSettings.filterAdjustments) }
     var favoriteFrameEffects by remember {
         mutableStateOf(initialSettings.favoriteFrameEffects)
     }
-    val currentSettings = LocalPhotoEffectsSettings(
+    fun currentPhotoEffectsSettings() = LocalPhotoEffectsSettings(
         decorationEnabled = decorationEnabled,
         borderEnabled = borderEnabled,
         preset = preset,
@@ -133,16 +134,20 @@ fun LocalPhotoEffectsPage(
         filterId = filterId,
         filterEnabled = filterEnabled,
         filterIntensityPercent = filterIntensity,
+        grain = grain,
+        grainIntensities = grainIntensities,
         filterIntensities = filterIntensities,
-        favoritePhotoFilters = favoritePhotoFilters,
+        filterAdjustments = filterAdjustments,
         favoriteFrameEffects = favoriteFrameEffects,
     )
-    val latestSettings by rememberUpdatedState(currentSettings)
+    val currentSettings = currentPhotoEffectsSettings()
     LaunchedEffect(currentSettings) {
-        settingsPreferences.save(currentSettings)
+        settingsPreferences.save(currentPhotoEffectsSettings())
     }
     DisposableEffect(settingsPreferences) {
-        onDispose { settingsPreferences.save(latestSettings) }
+        // A synchronous directory change may clear controls immediately before disposal,
+        // before rememberUpdatedState has received another composition.
+        onDispose { settingsPreferences.save(currentPhotoEffectsSettings()) }
     }
 
     var hintText by remember { mutableStateOf("") }
@@ -211,8 +216,72 @@ fun LocalPhotoEffectsPage(
     val photoLutDraft = rememberPhotoLutDraft("local", initialLut) {
         filterEnabled = false
     }
+    val photoNp3Draft = rememberPhotoNp3Draft(
+        "local", state.photoFilters.firstOrNull { it.id == filterId },
+        selectionAllowed = active,
+        onSelected = { imported, explicit ->
+            viewModel.registerPhotoFilter(imported)
+            filterId = imported.id
+            filterIntensity = photoFilterCatalogKey(imported.id)?.let(filterIntensities::get)
+                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+            if (explicit && active()) {
+                photoLutDraft.off()
+                filterEnabled = true
+            }
+        },
+        onUnavailable = {
+            filterEnabled = false
+            filterId = null
+            filterIntensity = DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
+        },
+    )
+    DisposableEffect(photoNp3Draft, settingsPreferences) {
+        var previousFolder = photoNp3Draft.store.folders.folder
+        val observer = photoNp3Draft.store.observeFolderChanges {
+            val folder = photoNp3Draft.store.folders.folder
+            val replaced = previousFolder != null && previousFolder != folder
+            previousFolder = folder
+            if (replaced) {
+                // The draft's observer closes an external selection. Clear its remembered
+                // controls even when this retained pager page currently uses a built-in.
+                val cleared = clearLocalPhotoNp3DirectorySettings(currentPhotoEffectsSettings())
+                filterId = cleared.filterId
+                filterEnabled = cleared.filterEnabled
+                filterIntensity = cleared.filterIntensityPercent
+                filterIntensities = cleared.filterIntensities
+                filterAdjustments = cleared.filterAdjustments
+                settingsPreferences.clearNp3DirectorySettings()
+            }
+        }
+        onDispose { observer.close() }
+    }
+    LaunchedEffect(filterEnabled, visibleModules, photoLutDraft.selection) {
+        if (!filterEnabled || !visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) || photoLutDraft.selection != null) {
+            photoNp3Draft.cancelPending()
+        }
+    }
+    LaunchedEffect(pageActive) {
+        if (!pageActive) photoNp3Draft.cancelPending()
+    }
+    val currentNp3Preset = state.photoFilters.firstOrNull { it.id == filterId }
+    val currentNp3Uri = photoNp3Draft.sourceFor(filterId)
+    fun savePhotoNp3Draft() {
+        photoNp3Draft.store.save("local",
+            viewModel.state.value.photoFilters.firstOrNull { it.id == filterId },
+            photoNp3Draft.sourceFor(filterId))
+    }
+    LaunchedEffect(currentNp3Preset, currentNp3Uri) {
+        savePhotoNp3Draft()
+    }
+    DisposableEffect(photoNp3Draft) {
+        onDispose { savePhotoNp3Draft() }
+    }
     fun applyModuleVisibility(mask: Int) {
-        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) filterEnabled = false
+        if (!mask.showsPhotoEffect(PhotoEffectModule.FILTER)) {
+            photoNp3Draft.cancelPending()
+            filterEnabled = false
+        }
+        if (!mask.showsPhotoEffect(PhotoEffectModule.GRAIN)) grain = grain.copy(enabled = false)
         if (!mask.showsPhotoEffect(PhotoEffectModule.LUT)) photoLutDraft.off()
         if (!mask.showsPhotoEffect(PhotoEffectModule.FRAME)) borderEnabled = false
         if (!mask.showsPhotoEffect(PhotoEffectModule.WATERMARK)) watermarkDraft = watermarkDraft.copy(enabled = false)
@@ -239,7 +308,7 @@ fun LocalPhotoEffectsPage(
     val selectedFilter = photoLutDraft.selection ?: state.photoFilters
         .firstOrNull { it.id == filterId }
         ?.takeIf { filterEnabled }
-        ?.let { PhotoFilterSelection(it, filterIntensity) }
+        ?.let { PhotoFilterSelection(it, filterIntensity, photoFilterAdjustmentsFor(filterId, filterAdjustments)) }
     val editorWatermark = when {
         !decorationEnabled -> PhotoFrameWatermark(enabled = false)
         isPro -> watermarkDraft.withEditorPlacementConstraints(
@@ -262,7 +331,7 @@ fun LocalPhotoEffectsPage(
         if (changesTextOnly) delay(140)
         renderWatermark = requestedRenderWatermark
     }
-    val hasEffect = decorationEnabled || selectedFilter != null
+    val hasEffect = decorationEnabled || selectedFilter != null || grain.isEnabled
     val view = androidx.compose.ui.platform.LocalView.current
     DisposableEffect(view, saving) {
         val previous = view.keepScreenOn
@@ -291,7 +360,7 @@ fun LocalPhotoEffectsPage(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     GlassButton(
-                        onClick = onNavigateUp,
+                        onClick = { photoNp3Draft.cancelPending(); onNavigateUp() },
                         modifier = Modifier.size(38.dp),
                         contentPadding = PaddingValues(0.dp),
                     ) {
@@ -334,12 +403,14 @@ fun LocalPhotoEffectsPage(
 
                 Spacer(Modifier.height(14.dp))
                 val previewFilterPrefetch = remember(
-                    state.photoFilters, favoritePhotoFilters, filterIntensities, filterId, filterEnabled, photoLutDraft.selection,
+                    state.photoFilters, state.favoritePhotoFilters, filterIntensities, filterAdjustments,
+                    filterId, filterEnabled, photoLutDraft.selection,
                 ) {
                     nextPhotoFilterSelections(
                         filters = state.photoFilters,
-                        favoriteCatalogKeys = favoritePhotoFilters.map { it.catalogKey },
+                        favoriteCatalogKeys = state.favoritePhotoFilters.map { it.catalogKey },
                         rememberedIntensities = filterIntensities,
+                        rememberedAdjustments = filterAdjustments,
                         selectedId = filterId,
                         enabled = filterEnabled && photoLutDraft.selection == null,
                     )
@@ -350,6 +421,7 @@ fun LocalPhotoEffectsPage(
                     borderEnabled = decorationEnabled && borderEnabled,
                     metadataSettings = resolvedPhotoFrameMetadataSettings(metadataSettings, preset).withoutLocationFields(),
                     filter = selectedFilter,
+                    grain = grain,
                 )
                 LocalPhotoPreviewPager(
                     photos = batch.photos,
@@ -414,35 +486,35 @@ fun LocalPhotoEffectsPage(
                 Spacer(Modifier.height(10.dp))
                 PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) && photoLutDraft.selection == null) {
                     PhotoFilterEditor(
+                        np3 = photoNp3Draft,
+                        active = pageActive && visibleModules.showsPhotoEffect(PhotoEffectModule.FILTER) &&
+                            photoLutDraft.selection == null,
                         filters = state.photoFilters,
-                        favoriteFilters = favoritePhotoFilters,
+                        favoriteFilters = state.favoritePhotoFilters,
                         rememberedIntensities = filterIntensities,
                         selectedId = filterId,
                         enabled = filterEnabled && photoLutDraft.selection == null,
                         intensityPercent = filterIntensity,
+                        adjustments = photoFilterAdjustmentsFor(filterId, filterAdjustments),
                         onDisabled = { filterEnabled = false },
                         onSelected = {
                             photoLutDraft.off()
                             filterId = it
+                            filterIntensity = photoFilterCatalogKey(it)?.let(filterIntensities::get)
+                                ?: DEFAULT_PHOTO_FILTER_INTENSITY_PERCENT
                             filterEnabled = true
                         },
                         onIntensityChanged = { selectedFilterId, intensity ->
                             filterIntensity = intensity
-                            val catalogKey = BuiltInPhotoFilters.catalogKey(selectedFilterId)
+                            val catalogKey = photoFilterCatalogKey(selectedFilterId)
                                 ?: selectedFilterId
                             filterIntensities = filterIntensities + (catalogKey to intensity)
                         },
-                        onFavoriteToggled = { selectedFilterId ->
-                            BuiltInPhotoFilters.catalogKey(selectedFilterId)?.let { catalogKey ->
-                                favoritePhotoFilters = if (
-                                    favoritePhotoFilters.any { it.catalogKey == catalogKey }
-                                ) {
-                                    favoritePhotoFilters.filterNot { it.catalogKey == catalogKey }
-                                } else {
-                                    favoritePhotoFilters + FavoritePhotoFilter(catalogKey)
-                                }
-                            }
+                        onAdjustmentsChanged = { selectedFilterId, adjustments ->
+                            val catalogKey = photoFilterCatalogKey(selectedFilterId) ?: selectedFilterId
+                            filterAdjustments = filterAdjustments + (catalogKey to adjustments)
                         },
+                        onFavoriteToggled = viewModel::toggleFavoritePhotoFilter,
                         hapticsEnabled = state.hapticsEnabled,
                     )
                 }
@@ -450,6 +522,22 @@ fun LocalPhotoEffectsPage(
                     visible = visibleModules.showsPhotoEffect(PhotoEffectModule.LUT) && (!(filterEnabled && state.photoFilters.any { it.id == filterId }) || photoLutDraft.selection != null),
                 ) {
                     PhotoLutEditor(photoLutDraft, state.hapticsEnabled)
+                }
+                PhotoColorEffectGroup(visible = visibleModules.showsPhotoEffect(PhotoEffectModule.GRAIN)) {
+                    PhotoGrainEditor(
+                        settings = grain,
+                        onStyleSelected = { style ->
+                            grain = grain.selectStyle(style, grainIntensities)
+                        },
+                        onIntensityChanged = { style, intensity ->
+                            val next = grain.changeIntensity(style, intensity)
+                            if (next != grain) {
+                                grain = next
+                                grainIntensities = grainIntensities + (next.style to next.intensityPercent)
+                            }
+                        },
+                        hapticsEnabled = state.hapticsEnabled,
+                    )
                 }
                 PhotoFrameWatermarkEditor(
                     showFrame = visibleModules.showsPhotoEffect(PhotoEffectModule.FRAME),
@@ -573,11 +661,8 @@ fun LocalPhotoEffectsPage(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 28.dp),
             ) {
-                Surface(
+                GlassHintSurface(
                     shape = RoundedCornerShape(18.dp),
-                    color = colors.glassSurfaceHeavy,
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, colors.glassPanelBorder),
                 ) {
                     Text(
                         text = hintText,

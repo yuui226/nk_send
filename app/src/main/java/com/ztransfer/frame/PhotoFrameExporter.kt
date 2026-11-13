@@ -34,8 +34,14 @@ import com.ztransfer.R
 import com.ztransfer.diagnostics.PhotoGenerationProbe
 import com.ztransfer.filter.PhotoFilterRenderer
 import com.ztransfer.filter.PhotoFilterSelection
+import com.ztransfer.grain.PHOTO_GRAIN_RENDER_VERSION
+import com.ztransfer.grain.PhotoGrainRenderer
+import com.ztransfer.grain.PhotoGrainSettings
+import com.ztransfer.grain.PhotoGrainStyle
+import com.ztransfer.grain.photoGrainSeed
 import com.ztransfer.util.applyExifOrientation
 import com.ztransfer.util.formatDegreesMinutesCoordinates
+import com.ztransfer.util.readPhotoCaptureExif
 import java.io.ByteArrayInputStream
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -285,7 +291,15 @@ private const val PHOTO_FRAME_EXPORT_TAG = "PhotoFrameExporter"
 internal data class PhotoFrameDestination(
     val directoryUri: Uri,
     val occupiedNames: MutableSet<String>,
-)
+    val documents: MutableMap<String, Uri>,
+    val readIdentity: (Uri) -> String?,
+) {
+    fun recordPublished(name: String, uri: Uri) {
+        // Keep distinct documents on case-sensitive providers; matching remains case-insensitive.
+        documents[name] = uri
+        occupiedNames.add(name)
+    }
+}
 
 private fun concurrentPhotoFrameNames(names: Collection<String>): MutableSet<String> =
     ConcurrentHashMap.newKeySet<String>().apply { addAll(names) }
@@ -394,6 +408,18 @@ internal fun orientedPhotoSize(
 internal fun photoFrameRegionRows(sourceWidth: Int): Int {
     require(sourceWidth > 0)
     return (PHOTO_FRAME_REGION_TARGET_PIXELS / sourceWidth).coerceAtLeast(1)
+}
+
+/** Budget and allocate the same scratch buffer; grain reuses a filter buffer when present. */
+internal fun photoFrameEffectScratchPixelCount(
+    width: Int,
+    height: Int,
+    hasFilter: Boolean,
+    hasGrain: Boolean,
+): Int = when {
+    hasFilter -> PhotoFilterRenderer.scratchPixelCount(width, height)
+    hasGrain -> PhotoGrainRenderer.scratchPixelCount(width, height)
+    else -> 0
 }
 
 internal fun orientedRegionRect(
@@ -591,44 +617,6 @@ object PhotoFrameExporter {
     // 派生图是原片的高品质版本，不允许静默缩成分享图。JPEG 仍必须重新编码，但使用
     // Android 编码器的最高质量档，照片主体的像素尺寸由原图完整保留。
     private const val COPY_BUFFER_BYTES = 256 * 1024
-    // Preserve photographic/capture metadata, including the GPS written by the camera. The
-    // source orientation is intentionally not copied because the pixels are normalized during
-    // decode.
-    private val COPIED_EXIF_TAGS = arrayOf(
-        ExifInterface.TAG_MAKE,
-        ExifInterface.TAG_MODEL,
-        ExifInterface.TAG_SOFTWARE,
-        ExifInterface.TAG_DATETIME,
-        ExifInterface.TAG_DATETIME_ORIGINAL,
-        ExifInterface.TAG_DATETIME_DIGITIZED,
-        ExifInterface.TAG_EXPOSURE_TIME,
-        ExifInterface.TAG_F_NUMBER,
-        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
-        ExifInterface.TAG_FOCAL_LENGTH,
-        ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-        ExifInterface.TAG_LENS_MAKE,
-        ExifInterface.TAG_LENS_MODEL,
-        ExifInterface.TAG_EXPOSURE_PROGRAM,
-        ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
-        ExifInterface.TAG_METERING_MODE,
-        ExifInterface.TAG_FLASH,
-        ExifInterface.TAG_WHITE_BALANCE,
-        ExifInterface.TAG_COLOR_SPACE,
-        ExifInterface.TAG_GPS_VERSION_ID,
-        ExifInterface.TAG_GPS_LATITUDE_REF,
-        ExifInterface.TAG_GPS_LATITUDE,
-        ExifInterface.TAG_GPS_LONGITUDE_REF,
-        ExifInterface.TAG_GPS_LONGITUDE,
-        ExifInterface.TAG_GPS_ALTITUDE_REF,
-        ExifInterface.TAG_GPS_ALTITUDE,
-        ExifInterface.TAG_GPS_TIMESTAMP,
-        ExifInterface.TAG_GPS_DATESTAMP,
-        ExifInterface.TAG_GPS_PROCESSING_METHOD,
-        ExifInterface.TAG_GPS_SPEED_REF,
-        ExifInterface.TAG_GPS_SPEED,
-        ExifInterface.TAG_GPS_TRACK_REF,
-        ExifInterface.TAG_GPS_TRACK,
-    )
     private val EMPTY_METADATA =
         PhotoFrameMetadata(null, null, null, null, null, null)
     private val bundledTypefaceCache = mutableMapOf<PhotoFrameWatermarkFont, Typeface>()
@@ -651,6 +639,7 @@ object PhotoFrameExporter {
         metadataSnapshot: PhotoFrameMetadata? = null,
         allowLocalMetadataRead: Boolean = true,
         placeAlreadyPrepared: Boolean = false,
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     ): Result<PhotoFrameExportResult> {
         return try {
             currentCoroutineContext().ensureActive()
@@ -676,12 +665,14 @@ object PhotoFrameExporter {
                 probeSessionId = probeSessionId,
                 allowLocalMetadataRead = allowLocalMetadataRead,
                 placeAlreadyPrepared = placeAlreadyPrepared,
+                grain = grain,
+                grainSeed = photoGrainSeed(sourceName),
             )
             recordGenerationStage(
                 probeSessionId,
                 "render_total",
                 generationProbeClock() - renderStartedAtMs,
-            ) { "output=${rendered.width}x${rendered.height}" }
+            ) { "output=${rendered.bitmap.width}x${rendered.bitmap.height}" }
             val saved = try {
                 currentCoroutineContext().ensureActive()
                 val saveStartedAtMs = generationProbeClock()
@@ -695,9 +686,11 @@ object PhotoFrameExporter {
                     borderEnabled = borderEnabled,
                     metadataSettings = effectiveMetadataSettings,
                     filter = filter,
-                    bitmap = rendered,
+                    bitmap = rendered.bitmap,
+                    renderedPlace = rendered.place,
                     probeSessionId = probeSessionId,
                     cameraMetadata = metadataSnapshot,
+                    grain = grain,
                 ).also {
                     recordGenerationStage(
                         probeSessionId,
@@ -706,7 +699,7 @@ object PhotoFrameExporter {
                     )
                 }
             } finally {
-                rendered.recycle()
+                rendered.bitmap.recycle()
             }
             Result.success(saved)
         } catch (cancelled: CancellationException) {
@@ -732,6 +725,7 @@ object PhotoFrameExporter {
         borderEnabled: Boolean = true,
         metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
         filter: PhotoFilterSelection? = null,
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     ): Result<PhotoFrameExportResult> {
         var stage = "render"
         return try {
@@ -752,6 +746,8 @@ object PhotoFrameExporter {
                 borderEnabled = borderEnabled,
                 metadataSettings = effectiveMetadataSettings,
                 filter = filter,
+                grain = grain,
+                grainSeed = photoGrainSeed(source.displayName),
             )
             stage = "save"
             val saved = try {
@@ -764,10 +760,12 @@ object PhotoFrameExporter {
                     borderEnabled = borderEnabled,
                     metadataSettings = effectiveMetadataSettings,
                     filter = filter,
-                    bitmap = rendered,
+                    bitmap = rendered.bitmap,
+                    renderedPlace = rendered.place,
+                    grain = grain,
                 )
             } finally {
-                rendered.recycle()
+                rendered.bitmap.recycle()
             }
             Result.success(saved)
         } catch (cancelled: CancellationException) {
@@ -794,23 +792,9 @@ object PhotoFrameExporter {
         check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             "Saving beside the source requires Android 10 or newer"
         }
-        val lookupUris = buildList {
-            add(sourceUri)
-            runCatching { MediaStore.getMediaUri(context, sourceUri) }
-                .getOrNull()
-                ?.takeIf { it != sourceUri }
-                ?.let(::add)
-            resolveMediaDocumentUri(sourceUri)?.takeIf { it != sourceUri }?.let(::add)
-        }.distinct()
-        val resolvedRows = lookupUris.mapNotNull { lookupUri ->
-            queryMediaStoreRow(resolver, lookupUri)?.let { row -> lookupUri to row }
-        }
-        val resolved = resolvedRows.firstOrNull { (lookupUri, row) ->
-            lookupUri.authority == MediaStore.AUTHORITY && !row.relativePath.isNullOrBlank()
-        } ?: resolvedRows.firstOrNull { (_, row) -> !row.relativePath.isNullOrBlank() }
-        val relatedMediaUri = resolvedRows.firstOrNull { (lookupUri, _) ->
-            lookupUri.authority == MediaStore.AUTHORITY
-        }?.first
+        val lookup = lookupLocalSource(context, resolver, sourceUri)
+        val resolved = lookup.resolved
+        val relatedMediaUri = lookup.relatedMediaUri
         val writableVolumes = runCatching { MediaStore.getExternalVolumeNames(context) }
             .getOrDefault(emptySet())
         val reportedVolume = resolved?.second?.volumeName
@@ -827,10 +811,7 @@ object PhotoFrameExporter {
         val fallbackCollectionUri = MediaStore.Images.Media.getContentUri(fallbackVolumeName)
         val relativePath = resolved?.second?.relativePath
             ?.takeIf { sourceVolume != null && it.isNotBlank() }
-        val displayName = resolved?.second?.displayName
-            ?: resolvedRows.firstOrNull()?.second?.displayName
-            ?: displayNameOf(resolver, sourceUri)
-            ?: "photo.jpg"
+        val displayName = lookup.displayName
         // Android 13+ may grant only the picked item's read permission rather than collection-wide
         // access. Name discovery is therefore best-effort; MediaStore itself resolves any physical
         // filename collision during insert, and the inserted row is queried again after publish.
@@ -869,6 +850,50 @@ object PhotoFrameExporter {
             "Cannot resolve local photo destination (authority=${sourceUri.authority}): " +
                 "${error.javaClass.simpleName}: ${error.message}",
         )
+    }
+
+    private data class LocalSourceLookup(
+        val resolved: Pair<Uri, PhotoFrameMediaStoreRow>?,
+        val relatedMediaUri: Uri?,
+        val displayName: String,
+    )
+
+    /** Reads only the selected item, never the rest of its album. */
+    internal fun readPreviewSourceName(
+        context: Context,
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): String = lookupLocalSource(context, resolver, sourceUri).displayName
+
+    private fun lookupLocalSource(
+        context: Context,
+        resolver: ContentResolver,
+        sourceUri: Uri,
+    ): LocalSourceLookup {
+        val lookupUris = buildList {
+            add(sourceUri)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                runCatching { MediaStore.getMediaUri(context, sourceUri) }
+                    .getOrNull()
+                    ?.takeIf { it != sourceUri }
+                    ?.let(::add)
+            }
+            resolveMediaDocumentUri(sourceUri)?.takeIf { it != sourceUri }?.let(::add)
+        }.distinct()
+        val resolvedRows = lookupUris.mapNotNull { lookupUri ->
+            queryMediaStoreRow(resolver, lookupUri)?.let { row -> lookupUri to row }
+        }
+        val resolved = resolvedRows.firstOrNull { (lookupUri, row) ->
+            lookupUri.authority == MediaStore.AUTHORITY && !row.relativePath.isNullOrBlank()
+        } ?: resolvedRows.firstOrNull { (_, row) -> !row.relativePath.isNullOrBlank() }
+        val relatedMediaUri = resolvedRows.firstOrNull { (lookupUri, _) ->
+            lookupUri.authority == MediaStore.AUTHORITY
+        }?.first
+        val displayName = resolved?.second?.displayName
+            ?: resolvedRows.firstOrNull()?.second?.displayName
+            ?: displayNameOf(resolver, sourceUri)
+            ?: "photo.jpg"
+        return LocalSourceLookup(resolved, relatedMediaUri, displayName)
     }
 
     private fun resolveMediaDocumentUri(uri: Uri): Uri? {
@@ -923,6 +948,8 @@ object PhotoFrameExporter {
         sourceUri: Uri,
     ): PhotoFrameMetadata = readMetadata(resolver, sourceUri)
 
+    private data class RenderedPhotoFrame(val bitmap: Bitmap, val place: FramePlace)
+
     private suspend fun renderSource(
         context: Context,
         resolver: ContentResolver,
@@ -937,7 +964,9 @@ object PhotoFrameExporter {
         probeSessionId: Long = PhotoGenerationProbe.NO_SESSION,
         allowLocalMetadataRead: Boolean = true,
         placeAlreadyPrepared: Boolean = false,
-    ): Bitmap {
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+        grainSeed: Int = PhotoGrainRenderer.DEFAULT_SEED,
+    ): RenderedPhotoFrame {
         val metadataStartedAtMs = generationProbeClock()
         val metadataTrace: ((String) -> Unit)? =
             if (probeSessionId == PhotoGenerationProbe.NO_SESSION) {
@@ -954,8 +983,7 @@ object PhotoFrameExporter {
         suspend fun resolvePlace(metadata: PhotoFrameMetadata): PhotoFrameMetadata =
             if (placeAlreadyPrepared) {
                 // A mode/network transition after preparation must still hide cached addresses.
-                if (PhotoFrameLocationResolver.allowed(context)) metadata
-                else metadata.copy(city = null, region = null, address = null)
+                metadata.withAllowedFramePlace(PhotoFrameLocationResolver.allowed(context))
             } else PhotoFrameLocationResolver.resolve(context, metadata, metadataSettings, metadataTrace)
         val metadata = if (borderEnabled) {
             if (metadataSnapshot != null || !allowLocalMetadataRead) {
@@ -1044,7 +1072,7 @@ object PhotoFrameExporter {
             }
         }
         if (borderEnabled && preset != PhotoFramePreset.IMMERSIVE) {
-            return renderOriginalFrameByRegions(
+            val bitmap = renderOriginalFrameByRegions(
                 context = context,
                 resolver = resolver,
                 sourceUri = sourceUri,
@@ -1055,11 +1083,14 @@ object PhotoFrameExporter {
                 probeSessionId = probeSessionId,
                 widthPercent = metadataSettings.widthPercent,
                 backdropSettings = metadataSettings,
+                grain = grain,
+                grainSeed = grainSeed,
             )
+            return RenderedPhotoFrame(bitmap, FramePlace(metadata.city, metadata.region))
         }
         val decodeStartedAtMs = generationProbeClock()
         val decoded = decodeOriginal(context, resolver, sourceUri,
-            extraBytes = if (filter != null) 24L * 1024 * 1024 else 0L)
+            extraBytes = if (filter != null || grain.isEnabled) 24L * 1024 * 1024 else 0L)
             ?: error("Cannot decode source photo")
         recordGenerationStage(
             probeSessionId,
@@ -1086,6 +1117,18 @@ object PhotoFrameExporter {
                     generationProbeClock() - filterStartedAtMs,
                 ) { "pixels=${decoded.width.toLong() * decoded.height}" }
             }
+            if (grain.isEnabled) {
+                val grainStartedAtMs = generationProbeClock()
+                PhotoGrainRenderer.renderInPlace(
+                    source = decoded,
+                    settings = grain,
+                    seed = grainSeed,
+                    isCancelled = { !renderContext.isActive },
+                )
+                recordGenerationStage(probeSessionId, "grain_pixels", generationProbeClock() - grainStartedAtMs) {
+                    "pixels=${decoded.width.toLong() * decoded.height} style=${grain.style.id} intensity=${grain.normalized().intensityPercent}"
+                }
+            }
             renderContext.ensureActive()
             val composeStartedAtMs = generationProbeClock()
             val rendered = renderFrame(
@@ -1104,7 +1147,7 @@ object PhotoFrameExporter {
                 generationProbeClock() - composeStartedAtMs,
             )
             if (rendered !== decoded) decoded.recycle()
-            rendered
+            RenderedPhotoFrame(rendered, FramePlace(metadata.city, metadata.region))
         } catch (error: Throwable) {
             decoded.recycle()
             throw error
@@ -1129,12 +1172,25 @@ object PhotoFrameExporter {
                 PHOTO_FRAME_OUTPUT_DIRECTORY,
             )
             ?: error("Cannot create frame output directory")
+        val documents = ConcurrentHashMap<String, Uri>()
         return PhotoFrameDestination(
             directoryUri = directoryUri,
             occupiedNames = concurrentPhotoFrameNames(
-                listChildNames(resolver, treeUri, directoryUri),
+                listChildNames(resolver, treeUri, directoryUri, documents),
             ),
+            documents = documents,
+            readIdentity = { uri -> readOutputIdentity(resolver, uri) },
         )
+    }
+
+    /** Read only JPEG header metadata; no bitmap decode or writable file descriptor needed. */
+    internal fun readOutputIdentity(resolver: ContentResolver, uri: Uri): String? = try {
+        resolver.openInputStream(uri)?.buffered()?.use(PhotoEffectIdentityJpeg::read)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        // Missing, inaccessible or externally rewritten files must never cause a false skip.
+        null
     }
 
     private fun findFrameDirectory(
@@ -1187,6 +1243,7 @@ object PhotoFrameExporter {
         resolver: ContentResolver,
         treeUri: Uri,
         directoryUri: Uri,
+        documents: MutableMap<String, Uri>,
     ): Set<String> {
         val documentId = DocumentsContract.getDocumentId(directoryUri)
         val childrenUri =
@@ -1228,6 +1285,12 @@ object PhotoFrameExporter {
                         }
                     } else {
                         add(name)
+                        if (idColumn >= 0) {
+                            cursor.getString(idColumn)?.let { childId ->
+                                documents[name] =
+                                    DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                            }
+                        }
                     }
                 }
             }
@@ -1478,15 +1541,26 @@ object PhotoFrameExporter {
         resolver: ContentResolver,
         uri: Uri,
         extraBytes: Long = 0L,
-    ): Bitmap? = decodeBitmap(
-        resolver = resolver,
-        uri = uri,
-        maxEdge = null,
-        mutable = true,
-        honorExifOrientation = true,
-        allocationExtraBytes = extraBytes,
-        allocationContext = context,
-    )
+    ): Bitmap? {
+        val decoded = decodeBitmap(
+            resolver = resolver,
+            uri = uri,
+            maxEdge = null,
+            mutable = true,
+            honorExifOrientation = true,
+            allocationExtraBytes = extraBytes,
+            allocationContext = context,
+        ) ?: return null
+        if (decoded.isMutable && decoded.config == Bitmap.Config.ARGB_8888) return decoded
+        // Software/sRGB decoding normally already satisfies this. Enforce the pixel-kernel
+        // contract for custom decoders too, including grain-only exports with no LUT/filter.
+        return try {
+            decoded.copy(Bitmap.Config.ARGB_8888, true)
+                ?: error("Cannot create mutable source photo")
+        } finally {
+            decoded.recycle()
+        }
+    }
 
     private fun decodeBitmap(
         resolver: ContentResolver,
@@ -1594,10 +1668,20 @@ object PhotoFrameExporter {
         longEdge: Int,
         filter: PhotoFilterSelection? = null,
         previewPlaceholders: Boolean = true,
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+        grainSeed: Int = PhotoGrainRenderer.DEFAULT_SEED,
+        // Callers reusing a filtered photo must still supply the original image for the backdrop.
+        // This bitmap is borrowed: never modified or recycled by the preview renderer.
+        backdropSource: Bitmap = source,
+        isCancelled: () -> Boolean = { false },
     ): Bitmap {
-        val input = filter?.let { PhotoFilterRenderer.render(source, it) } ?: source
+        val filtered = filter?.let { PhotoFilterRenderer.render(source, it, isCancelled) } ?: source
+        var input = filtered
+        var output: Bitmap? = null
         return try {
-            renderFrame(
+            input = PhotoGrainRenderer.render(filtered, grain, grainSeed, isCancelled)
+            if (isCancelled()) throw CancellationException("Photo preview superseded")
+            val rendered = renderFrame(
                 context = context,
                 source = input,
                 metadata = metadata.withPresentation(
@@ -1609,13 +1693,21 @@ object PhotoFrameExporter {
                 watermark = watermark.forBorderMode(borderEnabled),
                 borderEnabled = borderEnabled,
                 // Preview must match export: filter only the photo, never the frame backdrop.
-                backdropSource = source,
+                backdropSource = backdropSource,
+                paletteSource = filtered,
                 longEdge = longEdge,
                 widthPercent = normalizePhotoFrameWidthPercent(metadataSettings.widthPercent),
                 backdropSettings = metadataSettings,
             )
+            if (isCancelled()) {
+                if (rendered !== input && rendered !== filtered && rendered !== source) rendered.recycle()
+                throw CancellationException("Photo preview superseded")
+            }
+            output = rendered
+            rendered
         } finally {
-            if (input !== source) input.recycle()
+            if (input !== source && input !== output && input !== filtered) input.recycle()
+            if (filtered !== source && filtered !== output) filtered.recycle()
         }
     }
 
@@ -1630,6 +1722,7 @@ object PhotoFrameExporter {
         longEdge: Int? = null,
         widthPercent: Int = 100,
         backdropSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+        paletteSource: Bitmap = source,
     ): Bitmap {
         require(longEdge == null || longEdge > 0)
         if (!borderEnabled) {
@@ -1642,11 +1735,12 @@ object PhotoFrameExporter {
             )
         }
         val expandedLayout = if (preset != PhotoFramePreset.IMMERSIVE) {
-            calculateMeasuredFrame(context, source.width, source.height, preset, widthPercent, metadata, watermark)
+            calculateMeasuredFrame(context, source.width, source.height, preset, widthPercent, metadata, watermark,
+                metadataSettings = backdropSettings)
                 .fitPreview(longEdge, allowUpscale = true)
         } else calculateImmersiveFrameLayout(source.width, source.height, longEdge ?: maxOf(source.width, source.height))
 
-        return renderFrameWithLayout(context, source, metadata, preset, watermark, backdropSource, longEdge, expandedLayout, backdropSettings)
+        return renderFrameWithLayout(context, source, metadata, preset, watermark, backdropSource, longEdge, expandedLayout, backdropSettings, paletteSource)
     }
 
     private fun renderFrameWithLayout(
@@ -1654,6 +1748,7 @@ object PhotoFrameExporter {
         preset: PhotoFramePreset, watermark: PhotoFrameWatermark, backdropSource: Bitmap,
         longEdge: Int?, layout: PhotoFrameLayout,
         backdropSettings: PhotoFrameMetadataSettings,
+        paletteSource: Bitmap = source,
     ): Bitmap {
         if (
             longEdge == null &&
@@ -1702,6 +1797,7 @@ object PhotoFrameExporter {
                     metadata,
                     watermark,
                     backdropSettings,
+                    paletteSource,
                 )
                 return output
             }
@@ -2080,7 +2176,23 @@ object PhotoFrameExporter {
     internal fun calculateMeasuredFrame(
         context: Context, width: Int, height: Int, preset: PhotoFramePreset, percent: Int,
         metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark,
+        metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     ): PhotoFrameLayout {
+        if (usesUniformPhotoFrameBorder(preset, metadataSettings, watermark)) {
+            val layout = calculateUniformPhotoFrameLayout(width, height, preset, percent)
+            // Brand Gallery's exposure/date/lens/location rows belong to the photo, even when
+            // the outer information band is absent. Reuse their layout and watermark avoidance.
+            return if (preset == PhotoFramePreset.BRAND_GALLERY) layout.copy(
+                photoTextLayout = measureBrandPhotoText(
+                    context = context,
+                    height = height.toDouble().div(width).times(1000).toFloat(),
+                    referenceShortEdge = min(layout.designWidth, layout.designHeight) / layout.textLayoutScale,
+                    preset = preset,
+                    metadata = metadata,
+                    watermark = watermark,
+                ),
+            ) else layout
+        }
         if (preset == PhotoFramePreset.PARAMETER_POSTER) {
             return calculateMeasuredParameterPosterLayout(width, height, percent, metadata)
         }
@@ -2480,12 +2592,12 @@ object PhotoFrameExporter {
             designMetadataTop = base.designMetadataTop * scale,
             textLayout = MeasuredFrameTextPlan(output), textLayoutScale = scale,
             photoTextLayout = if (preset.isBrandFrame()) measureBrandPhotoText(context,
-                photoHeight, base, preset, metadata, watermark) else null)
+                photoHeight, min(base.designWidth, base.designHeight), preset, metadata, watermark) else null)
     }
 
     /** Photo-relative coordinates: outer border changes never squeeze the inner information. */
     private fun measureBrandPhotoText(
-        context: Context, height: Float, base: PhotoFrameLayout, preset: PhotoFramePreset,
+        context: Context, height: Float, referenceShortEdge: Float, preset: PhotoFramePreset,
         metadata: PhotoFrameMetadata, watermark: PhotoFrameWatermark,
     ): MeasuredFrameTextPlan {
         val shortEdge = min(1000f, height)
@@ -2530,7 +2642,7 @@ object PhotoFrameExporter {
         if (rows.isEmpty()) return MeasuredFrameTextPlan(emptyList())
         val photo = RectF(0f, 0f, 1000f, height)
         val occupied = layoutPhotoWatermark(context, Canvas(), photo, preset, watermark.forBrandPhoto(preset),
-            min(base.designWidth, base.designHeight))?.bounds?.toBrandFrameBounds()
+            referenceShortEdge)?.bounds?.toBrandFrameBounds()
         val blockWidth = rows.maxOf { it.width }
         val blockHeight = frameRowsHeight(rows)
         val area = placeBrandMetadataBlock(photo.toBrandFrameBounds(), height - shortEdge * (if (preset == PhotoFramePreset.BRAND_INSET) 0.030f else 0.035f),
@@ -3270,18 +3382,14 @@ object PhotoFrameExporter {
         val attributes = runCatching {
             resolver.openFileDescriptor(sourceUri, "r")?.use { descriptor ->
                 val source = ExifInterface(descriptor.fileDescriptor)
-                COPIED_EXIF_TAGS.mapNotNull { tag ->
-                    source.getAttribute(tag)?.let { value -> tag to value }
-                }
+                readPhotoCaptureExif(source)
             }
         }.getOrNull()?.takeIf { it.isNotEmpty() }
             ?: runCatching {
                 resolver.openInputStream(sourceUri)?.use { input ->
                     BufferedInputStream(input).use { buffered ->
                         val source = ExifInterface(buffered)
-                        COPIED_EXIF_TAGS.mapNotNull { tag ->
-                            source.getAttribute(tag)?.let { value -> tag to value }
-                        }
+                        readPhotoCaptureExif(source)
                     }
                 }
             }.getOrNull()
@@ -3344,6 +3452,8 @@ object PhotoFrameExporter {
         probeSessionId: Long,
         widthPercent: Int = 100,
         backdropSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+        grainSeed: Int = PhotoGrainRenderer.DEFAULT_SEED,
     ): Bitmap = withRegionDecoder(
         context = context,
         resolver = resolver,
@@ -3354,19 +3464,21 @@ object PhotoFrameExporter {
         val orientation = readSourceOrientation(resolver, sourceUri)
         val orientedSize = orientedPhotoSize(decoder.width, decoder.height, orientation)
         val layout = if (preset != PhotoFramePreset.IMMERSIVE) {
-            calculateMeasuredFrame(context, orientedSize.width, orientedSize.height, preset, widthPercent, metadata, watermark)
+            calculateMeasuredFrame(context, orientedSize.width, orientedSize.height, preset, widthPercent, metadata, watermark,
+                metadataSettings = backdropSettings)
         } else calculateOriginalQualityFrameLayout(orientedSize.width, orientedSize.height, preset)
         val regionHeight = minOf(photoFrameRegionRows(decoder.width), decoder.height)
         val tileBytes = decoder.width.toLong() * regionHeight * 4L
-        val scratchBytes = if (filter != null)
-            PhotoFilterRenderer.scratchPixelCount(decoder.width, regionHeight).toLong() * 4L else 0L
+        val scratchBytes = photoFrameEffectScratchPixelCount(
+            decoder.width, regionHeight, hasFilter = filter != null, hasGrain = grain.isEnabled,
+        ).toLong() * 4L
         val backdropEdge = backdropPreviewLongEdge(preset, backdropSettings.backgroundBlurPercent)
         // A low-blur background needs a sharper proxy, including a temporary orientation copy.
         // Default effects retain their original allocation threshold.
         val extraBackdropBytes = if (backdropEdge > 192) backdropEdge.toLong() * backdropEdge * 8L else 0L
         ensurePhotoAllocation(context, layout.canvasWidth, layout.canvasHeight,
             extraBytes = tileBytes + scratchBytes + extraBackdropBytes +
-                (if (filter != null) 8L * 1024 * 1024 else 0L),
+                (if (filter != null || grain.isEnabled) 8L * 1024 * 1024 else 0L),
             javaBytes = scratchBytes)
         val output = Bitmap.createBitmap(
             layout.canvasWidth,
@@ -3397,6 +3509,8 @@ object PhotoFrameExporter {
                     orientation = orientation,
                     filter = filter,
                     probeSessionId = probeSessionId,
+                    grain = grain,
+                    grainSeed = grainSeed,
                 )
                 // The complete plaque band and both watermark modes are composited after filtering.
                 val decorationStartedAtMs = generationProbeClock()
@@ -3423,6 +3537,8 @@ object PhotoFrameExporter {
                     orientation = orientation,
                     filter = filter,
                     probeSessionId = probeSessionId,
+                    grain = grain,
+                    grainSeed = grainSeed,
                 )
                 canvas.restore()
                 val decorationStartedAtMs = generationProbeClock()
@@ -3481,6 +3597,8 @@ object PhotoFrameExporter {
                         orientation = orientation,
                         filter = filter,
                         probeSessionId = probeSessionId,
+                        grain = grain,
+                        grainSeed = grainSeed,
                     )
                     canvas.restore()
                 } else {
@@ -3491,6 +3609,8 @@ object PhotoFrameExporter {
                         orientation = orientation,
                         filter = filter,
                         probeSessionId = probeSessionId,
+                        grain = grain,
+                        grainSeed = grainSeed,
                     )
                 }
                 val decorationStartedAtMs = generationProbeClock()
@@ -3549,6 +3669,8 @@ object PhotoFrameExporter {
                 orientation = orientation,
                 filter = filter,
                 probeSessionId = probeSessionId,
+                grain = grain,
+                grainSeed = grainSeed,
             )
             val decorationStartedAtMs = generationProbeClock()
             // Watermark is intentionally after the filtered photo tiles and is never filtered.
@@ -3728,12 +3850,16 @@ object PhotoFrameExporter {
         orientation: Int,
         filter: PhotoFilterSelection?,
         probeSessionId: Long,
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+        grainSeed: Int = PhotoGrainRenderer.DEFAULT_SEED,
     ) {
         val rowsPerRegion = photoFrameRegionRows(decoder.width)
         val paint = Paint(Paint.DITHER_FLAG)
-        val filterScratch = filter?.let {
-            IntArray(PhotoFilterRenderer.scratchPixelCount(decoder.width, minOf(rowsPerRegion, decoder.height)))
-        }
+        val scratchCount = photoFrameEffectScratchPixelCount(
+            decoder.width, minOf(rowsPerRegion, decoder.height),
+            hasFilter = filter != null, hasGrain = grain.isEnabled,
+        )
+        val pixelScratch = if (scratchCount > 0) IntArray(scratchCount) else null
         val renderContext = currentCoroutineContext()
         val isRenderCancelled = { !renderContext.isActive }
         val filterPreparationStartedAtMs = generationProbeClock()
@@ -3754,6 +3880,7 @@ object PhotoFrameExporter {
         var regionCount = 0
         var decodeElapsedMs = 0L
         var filterElapsedMs = 0L
+        var grainElapsedMs = 0L
         var drawElapsedMs = 0L
         val decodeSamplesMs = if (PhotoGenerationProbe.enabled) arrayListOf<Long>() else null
         val filterSamplesMs = if (PhotoGenerationProbe.enabled && filter != null) {
@@ -3771,7 +3898,7 @@ object PhotoFrameExporter {
                 rawRegion,
                 BitmapFactory.Options().apply {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
-                    inMutable = filter != null
+                    inMutable = filter != null || grain.isEnabled
                     inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
                 },
             ) ?: error("Cannot decode source photo region")
@@ -3780,24 +3907,41 @@ object PhotoFrameExporter {
             decodeSamplesMs?.add(regionDecodeMs)
             regionCount++
             try {
+                if ((preparedFilter != null || grain.isEnabled) &&
+                    (!tile.isMutable || (grain.isEnabled && tile.config != Bitmap.Config.ARGB_8888))
+                ) {
+                    val mutable = tile.copy(Bitmap.Config.ARGB_8888, true)
+                        ?: error("Cannot create mutable photo region")
+                    tile.recycle()
+                    tile = mutable
+                }
                 if (preparedFilter != null) {
                     val filterStartedAtMs = generationProbeClock()
-                    if (!tile.isMutable) {
-                        val mutable = tile.copy(Bitmap.Config.ARGB_8888, true)
-                            ?: error("Cannot create mutable photo region")
-                        tile.recycle()
-                        tile = mutable
-                    }
                     // Only this source-photo region is filtered. No frame pixel exists yet here.
                     PhotoFilterRenderer.renderInPlace(
                         source = tile,
                         prepared = preparedFilter,
                         isCancelled = isRenderCancelled,
-                        scratchPixels = filterScratch,
+                        scratchPixels = pixelScratch,
                     )
                     val regionFilterMs = generationProbeClock() - filterStartedAtMs
                     filterElapsedMs += regionFilterMs
                     filterSamplesMs?.add(regionFilterMs)
+                }
+                if (grain.isEnabled) {
+                    val grainStartedAtMs = generationProbeClock()
+                    PhotoGrainRenderer.renderInPlace(
+                        source = tile,
+                        settings = grain,
+                        seed = grainSeed,
+                        fullWidth = decoder.width,
+                        fullHeight = decoder.height,
+                        originY = rawTop,
+                        orientation = orientation.takeIf { it in 1..8 } ?: ExifInterface.ORIENTATION_NORMAL,
+                        isCancelled = isRenderCancelled,
+                        scratchPixels = pixelScratch,
+                    )
+                    grainElapsedMs += generationProbeClock() - grainStartedAtMs
                 }
                 val drawStartedAtMs = generationProbeClock()
                 val mapped = orientedRegionRect(
@@ -3869,6 +4013,11 @@ object PhotoFrameExporter {
                 }
             }
         }
+        if (grain.isEnabled) {
+            recordGenerationStage(probeSessionId, "grain_pixels", grainElapsedMs) {
+                "pixels=$pixelCount regions=$regionCount style=${grain.style.id} intensity=${grain.normalized().intensityPercent}"
+            }
+        }
         recordGenerationStage(probeSessionId, "region_orient_draw", drawElapsedMs) {
             "regions=$regionCount orientation=$orientation mode=canvas_matrix"
         }
@@ -3884,10 +4033,11 @@ object PhotoFrameExporter {
         metadata: PhotoFrameMetadata,
         watermark: PhotoFrameWatermark,
         backdropSettings: PhotoFrameMetadataSettings,
+        paletteSource: Bitmap = source,
     ) {
         drawEditorialFrameBase(
             canvas,
-            if (preset == PhotoFramePreset.COLOR_ARCHIVE) source else backdropSource,
+            if (preset == PhotoFramePreset.COLOR_ARCHIVE) paletteSource else backdropSource,
             layout,
             preset,
             backdropSettings,
@@ -4536,6 +4686,8 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         bitmap: Bitmap,
+        renderedPlace: FramePlace,
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     ): PhotoFrameExportResult {
         val preferred = photoFrameOutputName(
             source.displayName,
@@ -4544,8 +4696,13 @@ object PhotoFrameExporter {
             borderEnabled = borderEnabled,
             metadataSettings = metadataSettings,
             filter = filter,
+            grain = grain,
         )
         val name = uniqueName(preferred, source.occupiedNames)
+        val identity = photoFrameOutputIdentity(
+            source.displayName, preset, watermark, borderEnabled, metadataSettings, filter, grain,
+            renderedPlace,
+        )
         val originalPath = source.relativePath
         val canTryOriginal = originalPath != null && canCreateDerivedImageInOriginalPath(
             relativePath = originalPath,
@@ -4564,6 +4721,7 @@ object PhotoFrameExporter {
                     relativePath = checkNotNull(originalPath),
                     relatedMediaUri = source.relatedMediaUri,
                     name = name,
+                    identity = identity,
                     bitmap = bitmap,
                     occupiedNames = source.occupiedNames,
                 )
@@ -4599,6 +4757,7 @@ object PhotoFrameExporter {
                 relativePath = LOCAL_PHOTO_FALLBACK_RELATIVE_PATH,
                 relatedMediaUri = null,
                 name = name,
+                identity = identity,
                 bitmap = bitmap,
                 occupiedNames = source.occupiedNames,
             )
@@ -4617,6 +4776,7 @@ object PhotoFrameExporter {
         relativePath: String,
         relatedMediaUri: Uri?,
         name: String,
+        identity: String,
         bitmap: Bitmap,
         occupiedNames: MutableSet<String>,
     ): PhotoFrameExportResult {
@@ -4644,7 +4804,9 @@ object PhotoFrameExporter {
         var keepTarget = false
         try {
             val written = resolver.openOutputStream(target, "w")?.let { raw ->
-                BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
+                PhotoEffectIdentityJpeg.outputStream(
+                    BufferedOutputStream(raw, COPY_BUFFER_BYTES), identity,
+                ).use { output ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
@@ -4687,8 +4849,10 @@ object PhotoFrameExporter {
         metadataSettings: PhotoFrameMetadataSettings,
         filter: PhotoFilterSelection?,
         bitmap: Bitmap,
+        renderedPlace: FramePlace,
         probeSessionId: Long,
         cameraMetadata: PhotoFrameMetadata? = null,
+        grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
     ): PhotoFrameExportResult {
         val parentUri = destination.directoryUri
         val preferred = photoFrameOutputName(
@@ -4698,7 +4862,13 @@ object PhotoFrameExporter {
             borderEnabled = borderEnabled,
             metadataSettings = metadataSettings,
             filter = filter,
+            grain = grain,
         )
+        val identity = photoFrameOutputIdentity(
+            sourceName, preset, watermark, borderEnabled, metadataSettings, filter, grain,
+            renderedPlace,
+        )
+        // Validate identity before reserving; failed settings must not consume a filename.
         // Reserve before touching the provider so concurrent exporters never select the same name.
         val name = reservePhotoFrameName(preferred, destination.occupiedNames)
         val tempName = photoFrameTempName(System.nanoTime())
@@ -4724,7 +4894,9 @@ object PhotoFrameExporter {
         try {
             val jpegStartedAtMs = generationProbeClock()
             val written = resolver.openOutputStream(temp, "w")?.let { raw ->
-                BufferedOutputStream(raw, COPY_BUFFER_BYTES).use { output ->
+                PhotoEffectIdentityJpeg.outputStream(
+                    BufferedOutputStream(raw, COPY_BUFFER_BYTES), identity,
+                ).use { output ->
                     bitmap.compress(Bitmap.CompressFormat.JPEG, PHOTO_FRAME_JPEG_QUALITY, output)
                 }
             } == true
@@ -4769,7 +4941,7 @@ object PhotoFrameExporter {
                 val result = PhotoFrameExportResult(
                     displayName = displayNameOf(resolver, renamed) ?: name,
                 )
-                destination.occupiedNames.add(result.displayName)
+                destination.recordPublished(result.displayName, renamed)
                 keepReservedName = true
                 return result
             }
@@ -4788,7 +4960,7 @@ object PhotoFrameExporter {
             val result = PhotoFrameExportResult(
                 displayName = displayNameOf(resolver, copied) ?: name,
             )
-            destination.occupiedNames.add(result.displayName)
+            destination.recordPublished(result.displayName, copied)
             keepReservedName = true
             return result
         } finally {
@@ -5453,6 +5625,31 @@ private fun PhotoFrameWatermark.withoutPhotoPlacement(): PhotoFrameWatermark =
         this
     }
 
+/** Share the actual render placement rules, including preset-specific AUTO/image mappings. */
+internal fun PhotoFrameWatermark.occupiesFrameBand(preset: PhotoFramePreset): Boolean {
+    if (!enabled) return false
+    return when {
+        preset.isBrandFrame() -> !forBrandPhoto(preset).enabled
+        preset.isEditorialFrame() -> bandWatermarkFor(preset) != null
+        else -> withoutPhotoPlacement().enabled
+    }
+}
+
+/**
+ * Legacy editorial fingerprints aliased AUTO to CENTER, although some templates draw AUTO
+ * inside the photo at the right. Version both choices: an old shared identity cannot tell
+ * which image was saved. Use the render mapping so genuinely identical positions stay stable.
+ */
+private fun PhotoFrameWatermark.hasAmbiguousLegacyPosition(preset: PhotoFramePreset): Boolean {
+    if (!enabled || content != PhotoFrameWatermarkContent.TEXT || !preset.isEditorialFrame() ||
+        (position != PhotoFrameWatermarkPosition.AUTO && position != PhotoFrameWatermarkPosition.CENTER)
+    ) return false
+    val automatic = copy(position = PhotoFrameWatermarkPosition.AUTO).forEditorialPhoto(preset)
+    val centered = copy(position = PhotoFrameWatermarkPosition.CENTER).forEditorialPhoto(preset)
+    return automatic.enabled != centered.enabled ||
+        (automatic.enabled && automatic.position != centered.position)
+}
+
 /**
  * Calculates the text origin from its actual glyph bounds. The 4% inset is based on the
  * photo's short edge, so landscape and portrait photos keep the same visual breathing room.
@@ -5794,11 +5991,77 @@ private const val FILM_GALLERY_RENDER_VERSION = 1
 private const val FILM_NEGATIVE_RENDER_VERSION = 2
 private const val PHOTO_FILTER_RENDER_VERSION = 3
 
-internal fun isPhotoFrameOutputName(name: String): Boolean =
-    PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name)
+private val SHORT_PHOTO_EFFECT_OUTPUT_PATTERN =
+    Regex("""_(?:(?:f|w)(?:_e)?(?:_g)?|e(?:_g)?|g)(?: \(\d+\)|_\d+)?\.jpe?g$""", RegexOption.IGNORE_CASE)
+private val PHOTO_EFFECT_IDENTITY_PATTERN = Regex("[0-9a-f]{64}", RegexOption.IGNORE_CASE)
 
-/** 同一张本地原片、同一预设及同一水印配置对应的首选输出名。 */
+internal fun isShortPhotoFrameOutputName(name: String): Boolean =
+    SHORT_PHOTO_EFFECT_OUTPUT_PATTERN.containsMatchIn(name)
+
+/** Short suffixes alone are not proof: a user's original can legitimately end in _f. */
+internal fun isPhotoFrameOutputName(name: String, identity: String? = null): Boolean =
+    PHOTO_FRAME_OUTPUT_PATTERN.containsMatchIn(name) ||
+        (isShortPhotoFrameOutputName(name) &&
+            identity != null && PHOTO_EFFECT_IDENTITY_PATTERN.matches(identity))
+
+/** Visible names describe operations only; render parameters live in the JPEG metadata. */
+@Suppress("UNUSED_PARAMETER")
 internal fun photoFrameOutputName(
+    sourceName: String,
+    preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    filter: PhotoFilterSelection? = null,
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+): String {
+    val decoration = when {
+        borderEnabled -> "_f"
+        watermark.enabled -> "_w"
+        else -> ""
+    }
+    val suffix = decoration + (if (filter != null) "_e" else "") +
+        (if (grain.isEnabled) "_g" else "")
+    return "${File(sourceName).nameWithoutExtension}${suffix.ifEmpty { "_e" }}.jpg"
+}
+
+/** Keep existing identities unless a rendered place or enabled grain needs its own version. */
+internal fun photoFrameOutputIdentity(
+    sourceName: String,
+    preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    filter: PhotoFilterSelection? = null,
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    renderedPlace: FramePlace? = null,
+): String {
+    val recipe = buildString {
+        append(legacyPhotoFrameOutputName(sourceName, preset, watermark, borderEnabled,
+            metadataSettings, filter).lowercase(Locale.ROOT))
+        if (grain.isEnabled) {
+            append("\u0000grain-v=$PHOTO_GRAIN_RENDER_VERSION\u0000i=${grain.normalized().intensityPercent}")
+            append("\u0000seed=${photoGrainSeed(sourceName)}")
+            if (grain.style != PhotoGrainStyle.FINE) append("\u0000style=${grain.style.id}")
+        }
+        if (usesRenderedPlaceIdentity(borderEnabled, metadataSettings)) {
+            // Unlike the selected fields, geocoded text can arrive after an offline export.
+            // Empty text is stable too; only a change to visible place text requires a new photo.
+            val settings = normalizePhotoFrameMetadataSettings(metadataSettings)
+            val city = if (settings.showCity) renderedPlace?.city.orEmpty().trim() else ""
+            val region = if (settings.showRegion) renderedPlace?.region.orEmpty().trim() else ""
+            append("\u0000place-v=1\u0000city=${city.length}:$city\u0000region=${region.length}:$region")
+        }
+    }
+    return MessageDigest.getInstance("SHA-256").digest(recipe.toByteArray(Charsets.UTF_8))
+        .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
+}
+
+private fun usesRenderedPlaceIdentity(borderEnabled: Boolean, settings: PhotoFrameMetadataSettings): Boolean =
+    borderEnabled && normalizePhotoFrameMetadataSettings(settings).let { it.showCity || it.showRegion }
+
+/** Legacy recipe name; rendered place text and grain require the JPEG identity as well. */
+internal fun legacyPhotoFrameOutputName(
     sourceName: String,
     preset: PhotoFramePreset,
     watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
@@ -5815,7 +6078,7 @@ internal fun photoFrameOutputName(
     }
     val decorationEnabled = borderEnabled || renderedWatermark.enabled
     val watermarkSuffix = if (decorationEnabled) {
-        "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset, renderedMetadataSettings)}"
+        "_w${photoFrameWatermarkFingerprint(renderedWatermark, preset, renderedMetadataSettings, borderEnabled)}"
     } else {
         ""
     }
@@ -5832,7 +6095,10 @@ internal fun photoFrameOutputName(
         "$watermarkSuffix$filterSuffix.jpg"
 }
 
-/** Changes whenever filter pixels change, so an older derived image cannot mask a new render. */
+/**
+ * Finishing controls already belong to every filter's identity, not only LUTs. Keep this
+ * serialization/version unchanged: neutral recipes must continue matching existing outputs.
+ */
 internal fun photoFilterRenderFingerprint(filter: PhotoFilterSelection): String =
     MessageDigest.getInstance("SHA-256")
         .digest(
@@ -5852,6 +6118,7 @@ internal fun photoFrameWatermarkFingerprint(
     watermark: PhotoFrameWatermark,
     preset: PhotoFramePreset,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    borderEnabled: Boolean = true,
 ): String {
     val effectiveMetadataSettings = normalizePhotoFrameMetadataSettings(metadataSettings)
     val metadataToken = photoFrameMetadataSettingsFingerprintToken(preset, effectiveMetadataSettings)
@@ -5917,9 +6184,13 @@ internal fun photoFrameWatermarkFingerprint(
         identity
     }
     val layoutVersion = if (preset == PhotoFramePreset.IMMERSIVE) "" else
-        "\u0000measured-layout-v=6" + (if (preset == PhotoFramePreset.FROSTED) "\u0000glass-panel-v=2" else "")
+        "\u0000measured-layout-v=6" + (if (preset == PhotoFramePreset.FROSTED) "\u0000glass-panel-v=2" else "") +
+            (if (borderEnabled && usesUniformPhotoFrameBorder(preset, effectiveMetadataSettings, watermark))
+                "\u0000equal-border-v=1" else "")
+    val positionVersion = if (borderEnabled && watermark.hasAmbiguousLegacyPosition(preset))
+        "\u0000watermark-position-v=2:${watermark.position.name}" else ""
     return MessageDigest.getInstance("SHA-256")
-        .digest((versionedIdentity + layoutVersion + if (effectiveMetadataSettings.brandStyle == PhotoFrameBrandStyle.LOGO) "\u0000brand-logo-v=3" else "").toByteArray(Charsets.UTF_8))
+        .digest((versionedIdentity + layoutVersion + positionVersion + if (effectiveMetadataSettings.brandStyle == PhotoFrameBrandStyle.LOGO) "\u0000brand-logo-v=3" else "").toByteArray(Charsets.UTF_8))
         .take(6)
         .joinToString("") { byte -> "%02x".format(Locale.ROOT, byte.toInt() and 0xff) }
 }
@@ -5977,9 +6248,8 @@ private fun resolvedWatermarkPosition(
 /**
  * 判断目标目录中是否已经有该原片按指定预设与水印配置生成的成片。
  *
- * 除首选名外也识别导出器为重名冲突生成的 " (n)" / 时间戳副本，避免用户重新点击
- * 已传照片时继续制造同款副本。原片名和扩展名均按 DocumentsProvider 的常见行为
- * 做大小写不敏感比较。
+ * 无地名、颗粒的旧长名继续按文件名查重；新短名读取 JPEG 内的配置标识。
+ * 两者都识别编号副本并按大小写不敏感比较；仅打开同来源、同操作标记的短名候选。
  */
 internal fun PhotoFrameDestination.hasFrameFor(
     sourceName: String,
@@ -5988,19 +6258,51 @@ internal fun PhotoFrameDestination.hasFrameFor(
     borderEnabled: Boolean = true,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    renderedPlace: FramePlace? = null,
+): Boolean = hasMatchingPhotoFrameOutput(
+    occupiedNames, sourceName, preset, watermark, borderEnabled, metadataSettings, filter, grain,
+    renderedPlace,
+) { name -> documents[name]?.let(readIdentity) }
+
+/** Shared by the actual destination query and single-file matching. */
+internal fun hasMatchingPhotoFrameOutput(
+    occupiedNames: Set<String>,
+    sourceName: String,
+    preset: PhotoFramePreset,
+    watermark: PhotoFrameWatermark = PhotoFrameWatermark(),
+    borderEnabled: Boolean = true,
+    metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
+    filter: PhotoFilterSelection? = null,
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    renderedPlace: FramePlace? = null,
+    readIdentity: (String) -> String?,
+): Boolean = hasPhotoEffectOutput(
+    occupiedNames,
+    photoFrameOutputName(sourceName, preset, watermark, borderEnabled, metadataSettings, filter, grain),
+    // Old filenames/identities cannot prove which place text was actually drawn.
+    if (grain.isEnabled || usesRenderedPlaceIdentity(borderEnabled, metadataSettings)) null
+    else legacyPhotoFrameOutputName(sourceName, preset, watermark, borderEnabled, metadataSettings, filter),
+    photoFrameOutputIdentity(sourceName, preset, watermark, borderEnabled, metadataSettings, filter, grain, renderedPlace),
+    readIdentity,
+)
+
+/** Rebuilding a destination after restart needs only the files, never an app-private record. */
+internal fun hasPhotoEffectOutput(
+    occupiedNames: Set<String>,
+    shortName: String,
+    legacyName: String?,
+    identity: String,
+    readIdentity: (String) -> String?,
 ): Boolean {
-    // A filename only records selected fields, not whether an earlier geocoder succeeded.
-    // Explicit re-export must be allowed to fill in a place missing from an offline export.
-    if (borderEnabled && (metadataSettings.showCity || metadataSettings.showRegion)) return false
-    val pattern = photoFrameOutputPattern(
-        sourceName,
-        preset,
-        watermark,
-        borderEnabled,
-        metadataSettings,
-        filter,
-    )
-    return occupiedNames.any(pattern::matches)
+    if (legacyName != null) {
+        val legacyPattern = photoFrameOutputPattern(legacyName)
+        if (occupiedNames.any(legacyPattern::matches)) return true
+    }
+    val shortPattern = photoFrameOutputPattern(shortName)
+    return occupiedNames.any { name ->
+        shortPattern.matches(name) && identity.equals(readIdentity(name), ignoreCase = true)
+    }
 }
 
 internal fun isPhotoFrameOutputFor(
@@ -6011,31 +6313,15 @@ internal fun isPhotoFrameOutputFor(
     borderEnabled: Boolean = true,
     metadataSettings: PhotoFrameMetadataSettings = defaultPhotoFrameMetadataSettings(preset),
     filter: PhotoFilterSelection? = null,
-): Boolean = photoFrameOutputPattern(
-    sourceName,
-    preset,
-    watermark,
-    borderEnabled,
-    metadataSettings,
-    filter,
-).matches(name)
+    identity: String? = null,
+    grain: PhotoGrainSettings = PhotoGrainSettings.OFF,
+    renderedPlace: FramePlace? = null,
+): Boolean = hasMatchingPhotoFrameOutput(
+    setOf(name), sourceName, preset, watermark, borderEnabled, metadataSettings, filter, grain,
+    renderedPlace,
+) { identity }
 
-private fun photoFrameOutputPattern(
-    sourceName: String,
-    preset: PhotoFramePreset,
-    watermark: PhotoFrameWatermark,
-    borderEnabled: Boolean,
-    metadataSettings: PhotoFrameMetadataSettings,
-    filter: PhotoFilterSelection?,
-): Regex {
-    val preferred = photoFrameOutputName(
-        sourceName,
-        preset,
-        watermark,
-        borderEnabled,
-        metadataSettings,
-        filter,
-    )
+private fun photoFrameOutputPattern(preferred: String): Regex {
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val extension = if (dot >= 0) preferred.substring(dot) else ""
@@ -6052,11 +6338,12 @@ internal fun uniqueName(preferred: String, occupied: Set<String>): String {
     val dot = preferred.lastIndexOf('.')
     val stem = if (dot >= 0) preferred.substring(0, dot) else preferred
     val ext = if (dot >= 0) preferred.substring(dot) else ""
-    for (index in 1..999) {
+    var index = 1L
+    while (true) {
         val candidate = "$stem ($index)$ext"
         if (candidate.lowercase(Locale.ROOT) !in normalizedOccupied) return candidate
+        index++
     }
-    return "${stem}_${System.currentTimeMillis()}$ext"
 }
 
 private fun formatAperture(value: Double): String =

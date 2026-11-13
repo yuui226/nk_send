@@ -20,7 +20,7 @@ test('测试上传与服务端发布和固定地址保持硬隔离', () => {
     const stage = functionSource('Invoke-UpdateStage');
 
     assert.match(stage, /Upload-VersionedApkToOss/);
-    assert.match(stage, /Test-PublicOssApk/);
+    assert.doesNotMatch(stage, /Test-PublicOssApk/);
     assert.match(stage, /-cne "UPLOAD"/);
     assert.doesNotMatch(stage, /\bCall\s+["']/);
     assert.doesNotMatch(stage, /Get-Update(?:Info|PublishState)/);
@@ -59,16 +59,21 @@ test('版本对象禁止覆盖且固定地址使用 OSS 同桶服务端复制', 
     assert.match(copy, /"--force"/);
 });
 
-test('发布快速校验只读取公网响应头并核对内容指纹', () => {
-    const verify = functionSource('Test-PublicOssApk');
-    const fullVerify = functionSource('Test-PublicOssApkFull');
-
-    assert.match(verify, /--head/);
-    assert.match(verify, /content-length/);
-    assert.match(verify, /content-md5/);
-    assert.match(verify, /x-oss-meta-sha256/);
-    assert.doesNotMatch(verify, /Read-LocalApkMetadata/);
-    assert.match(fullVerify, /Read-LocalApkMetadata/);
+test('上传和发布不再自动访问公网 APK，手动校验仍可用', () => {
+    const guiScript = fs.readFileSync(path.join(__dirname, '..', 'admin-gui.ps1'), 'utf8');
+    for (const name of ['Invoke-UpdateStage', 'Invoke-UpdatePublish']) {
+        assert.doesNotMatch(functionSource(name), /Test-PublicOssApk|Invoke-Curl/);
+    }
+    for (const action of ['stage', 'publish']) {
+        const start = guiScript.indexOf(`            '${action}' {`);
+        assert.notEqual(start, -1);
+        const end = guiScript.indexOf("\n            '", start + 1);
+        assert.notEqual(end, -1);
+        assert.doesNotMatch(guiScript.slice(start, end), /Test-PublicOssApk|Invoke-Curl/);
+    }
+    assert.doesNotMatch(adminScript, /function Test-PublicOssApk\(/);
+    assert.match(functionSource('Invoke-UpdateValidate'), /Test-PublicOssApkFull/);
+    assert.match(functionSource('Test-PublicOssApkFull'), /Read-LocalApkMetadata/);
 });
 
 test('菜单默认安全入口与正式发布入口不会混淆', () => {

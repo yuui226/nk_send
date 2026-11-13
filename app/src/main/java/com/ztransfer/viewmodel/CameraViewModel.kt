@@ -28,6 +28,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.exifinterface.media.ExifInterface
 import com.ztransfer.diagnostics.FileOrderProbe
 import com.ztransfer.diagnostics.PhotoGenerationProbe
+import com.ztransfer.diagnostics.StaConnectionDiagnostics
 import com.ztransfer.diagnostics.ThumbnailDiagnostics
 import com.ztransfer.protocol.CameraConnectionType
 import com.ztransfer.protocol.CameraEndpointOverride
@@ -36,6 +37,10 @@ import com.ztransfer.protocol.Lab
 import com.ztransfer.protocol.NikonCamera
 import com.ztransfer.protocol.PairingCompletedException
 import com.ztransfer.protocol.PairingNotConfirmedException
+import com.ztransfer.protocol.StaPairingConfirmation
+import com.ztransfer.protocol.StaPairingCleanupException
+import com.ztransfer.protocol.StaPairingConfirmationMissingException
+import com.ztransfer.protocol.StaResponseException
 import com.ztransfer.protocol.PTPIP_IDENTITY_PREFERENCES
 import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.protocol.PtpIpCandidate
@@ -47,10 +52,13 @@ import com.ztransfer.protocol.rcPollEvents
 import com.ztransfer.service.CameraSessionService
 import com.ztransfer.util.applyExifOrientation
 import java.io.ByteArrayInputStream
+import java.io.EOFException
 import java.io.IOException
+import java.net.BindException
 import java.net.ConnectException
 import java.net.InetAddress
 import java.net.NoRouteToHostException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
@@ -61,8 +69,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -130,6 +140,30 @@ internal fun isTransientStaServiceReadinessFailure(error: Throwable?): Boolean =
         error is ConnectException ||
         (error is IOException && error.message?.startsWith("STA album access unavailable") == true)
 
+/** A timed-out pairing exchange may already have been applied; it is not a service-ready retry. */
+internal fun isFailedStaPairingExchange(
+    exchangeStarted: Boolean,
+    failure: Throwable?,
+): Boolean = exchangeStarted && failure !is PairingCompletedException
+
+/** A STA-specific suggestion, not a global translation of PTP TransactionCancelled. */
+internal fun staFailureMessageResource(error: Throwable?, candidateKnown: Boolean): Int? {
+    // Pairing recovery wraps the original rejection. Keep the actionable hint through that wrap.
+    if (generateSequence(error) { it.cause }.take(8).any {
+            it is StaResponseException && it.responseCode == 0x201F
+        }
+    ) return com.ztransfer.R.string.sta_camera_check_photos
+    return when (error) {
+        is StaPairingConfirmationMissingException -> com.ztransfer.R.string.sta_pairing_incomplete
+        is CameraRefusedException -> if (candidateKnown) {
+            com.ztransfer.R.string.sta_camera_refused_retrying
+        } else {
+            com.ztransfer.R.string.sta_camera_refused_repair
+        }
+        else -> null
+    }
+}
+
 /** STA reconnection is selected only for an established STA-origin Wi-Fi session. */
 internal fun shouldReconnectUsingSta(
     connectionType: CameraConnectionType?,
@@ -140,7 +174,9 @@ internal fun shouldReconnectUsingSta(
 internal fun shouldKeepStaDiscoveryAlive(
     reconnectRequested: Boolean,
     hasReusableProfile: Boolean,
-): Boolean = reconnectRequested || hasReusableProfile
+    failure: Throwable? = null,
+): Boolean = failure !is StaPairingConfirmationMissingException &&
+    (reconnectRequested || hasReusableProfile)
 
 /** A reconnect request that overlaps the tail of the previous scan must be retried, not dropped. */
 internal fun shouldScheduleStaDiscoveryRetry(
@@ -153,6 +189,95 @@ internal fun canActivateStaSession(
     albumAccessValidated: Boolean,
     pairingConfirmed: Boolean,
 ): Boolean = albumAccessValidated && pairingConfirmed
+
+/** A failed computer pairing cannot escape through album access; a stale album route may recover. */
+internal fun shouldBlockStaAlbumFallback(
+    preferredIdentity: StaInitiatorIdentity,
+    pairingFlowStarted: Boolean,
+): Boolean = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER && pairingFlowStarted
+
+/** A valid frame can survive one cleanup reconnect, but never change the confirmed camera. */
+internal fun canRecoverStaPairingCleanup(
+    identity: StaInitiatorIdentity,
+    previousConfirmation: StaPairingConfirmation?,
+    confirmation: StaPairingConfirmation,
+    recoveryUsed: Boolean,
+): Boolean = identity == StaInitiatorIdentity.PAIRED_COMPUTER && !recoveryUsed &&
+    confirmation.remotePermissionVerified && previousConfirmation != null &&
+    previousConfirmation.responderGuid == confirmation.responderGuid
+
+/** The same repair budget covers a refused monitor request and an explicit pairing-only body. */
+internal fun canRetryUnconfirmedStaPairing(
+    confirmation: StaPairingConfirmation?,
+    recoveryUsed: Boolean,
+    failure: PairingNotConfirmedException,
+): Boolean = !recoveryUsed && confirmation?.remotePermissionVerified != true &&
+    (failure.remoteRequestAttempted || failure.pairingOnly)
+
+/** Reuse the healthy pairing-only connection only while this body's one repair is still available. */
+internal fun canUseInlineStaPairingRecovery(
+    identity: StaInitiatorIdentity,
+    confirmation: StaPairingConfirmation?,
+    recoveryUsed: Boolean,
+): Boolean = identity == StaInitiatorIdentity.PAIRED_COMPUTER && !recoveryUsed &&
+    confirmation != null && !confirmation.remotePermissionVerified
+
+/** A failed read does not justify another pairing exchange or discarding the pending receipt. */
+internal fun canRetryStaPairingReadFailure(
+    failure: PairingNotConfirmedException,
+    readinessRetryUsed: Boolean,
+): Boolean = !readinessRetryUsed && !failure.remoteRequestAttempted && !failure.pairingOnly
+
+/** Connection cleanup time is part of the camera restart interval, not an extra wait before it. */
+internal fun remainingStaPairingRestartDelay(
+    resultAcknowledgedAtMs: Long,
+    nowMs: Long,
+    restartDelayMs: Long,
+): Long = if (resultAcknowledgedAtMs <= 0L) restartDelayMs else {
+    (restartDelayMs - (nowMs - resultAcknowledgedAtMs).coerceAtLeast(0L))
+        .coerceIn(0L, restartDelayMs)
+}
+
+/**
+ * The return window starts when the pairing command is acknowledged. Service restart and the
+ * time the user needs to confirm the camera are both inside that same window.
+ */
+internal fun staPairingReturnDeadlineMs(
+    resultAcknowledgedAtMs: Long,
+    nowMs: Long,
+    windowMs: Long,
+): Long = (if (resultAcknowledgedAtMs > 0L) resultAcknowledgedAtMs else nowMs) + windowMs
+
+/** The camera is unreachable or has dropped the link. A protocol refusal is not a disconnect. */
+internal fun isStaCameraTemporarilyOffline(error: Throwable?): Boolean {
+    if (error == null ||
+        error is StaResponseException ||
+        error is CameraRefusedException ||
+        error is UnexpectedStaResponderException ||
+        error is PairingCompletedException ||
+        error is StaPairingConfirmationMissingException ||
+        error is StaPairingCleanupException ||
+        (error is PairingNotConfirmedException && (error.pairingOnly || error.remoteRequestAttempted))
+    ) return false
+    return generateSequence(error) { it.cause }.take(8).any {
+        (it is SocketException && it !is BindException) || it is SocketTimeoutException || it is EOFException
+    }
+}
+
+/**
+ * After a successful pairing command, keep that receipt and retry the same camera until the
+ * return deadline. A dropped link must not start another pairing exchange.
+ */
+internal fun shouldRetryStaPairingReturn(
+    confirmation: StaPairingConfirmation?,
+    exchangeStarted: Boolean,
+    failure: Throwable?,
+    nowMs: Long,
+    deadlineMs: Long,
+): Boolean = confirmation != null &&
+    !exchangeStarted &&
+    deadlineMs > nowMs &&
+    isStaCameraTemporarilyOffline(failure)
 
 internal fun restoredStaInitiatorIdentity(value: String?): StaInitiatorIdentity =
     runCatching { StaInitiatorIdentity.valueOf(value.orEmpty()) }
@@ -426,6 +551,7 @@ data class CameraState(
     /** Latest camera still, quietly prefetched at FHD for the frame/filter settings demos. */
     val effectPreviewBitmap: Bitmap? = null,
     val effectPreviewFileKey: String? = null,
+    val effectPreviewFileName: String? = null,
     /** EXIF belonging to [effectPreviewFileKey], published atomically with the FHD bitmap. */
     val effectPreviewExif: PhotoExif? = null,
     // 当前候选 Wi-Fi 的信号强度（dBm，典型 -30 强 ~ -90 弱）；无候选链路时为 null。
@@ -494,6 +620,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Number of newest actual shooting dates whose thumbnail boundary is complete.
     private val _recentThumbnailReadyDays = MutableStateFlow(0)
     val recentThumbnailReadyDays: StateFlow<Int> = _recentThumbnailReadyDays.asStateFlow()
+    private val _thumbnailReadyEvents = MutableSharedFlow<Int>(
+        extraBufferCapacity = 128,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    /** Successful cache publication only; visible missing cells can reload locally without polling. */
+    val thumbnailReadyEvents: SharedFlow<Int> = _thumbnailReadyEvents.asSharedFlow()
     private val _newMediaFiles = MutableSharedFlow<NewCameraMedia>(
         extraBufferCapacity = 32,
     )
@@ -505,9 +637,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private var camera: NikonCamera? = null
     private var keepaliveJob: Job? = null
-    // STA 的短暂网络抖动不应立即拆掉已建立的会话。只有连续保活失败后，才进入
-    // 统一的断线重连路径；若确实重连，则尽量沿用当前列表，避免用户看到整页重载。
-    private var staReconnectPreserveExisting = false
     private var watcherJob: Job? = null
     private var eventPollJob: Job? = null
     private data class PendingNewCameraObject(
@@ -608,6 +737,68 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private var thumbnailDiskWritesBlocked = false
     private val thumbnailFillQueue = ThumbnailFillQueue()
     private val thumbnailFillWake = Channel<Unit>(Channel.CONFLATED)
+    private val newObjectThumbnailRetries = NewObjectThumbnailRetries()
+    private var newObjectThumbnailRetryJob: Job? = null
+    private var newObjectThumbnailRetryAtMs: Long? = null
+
+    private fun clearNewObjectThumbnailRetries() {
+        newObjectThumbnailRetryJob?.cancel()
+        newObjectThumbnailRetryJob = null
+        newObjectThumbnailRetryAtMs = null
+        newObjectThumbnailRetries.clear()
+    }
+
+    private fun retryFailedThumbnails() {
+        val now = SystemClock.elapsedRealtime()
+        thumbnailFillQueue.retryFailed { newObjectThumbnailRetries.canAttempt(it.handle, now) }
+    }
+
+    /** One timer for the session; delays never hold the camera gate or delay other thumbnails. */
+    private fun scheduleNewObjectThumbnailRetryWake() {
+        val next = newObjectThumbnailRetries.nextRetryAtMs()
+        if (next == newObjectThumbnailRetryAtMs && newObjectThumbnailRetryJob?.isActive == true) return
+        newObjectThumbnailRetryJob?.cancel()
+        newObjectThumbnailRetryJob = null
+        newObjectThumbnailRetryAtMs = next
+        if (next == null) return
+        val expectedCamera = camera
+        val expectedGeneration = thumbnailCacheSessionGeneration
+        newObjectThumbnailRetryJob = viewModelScope.launch {
+            delay((next - SystemClock.elapsedRealtime()).coerceAtLeast(1L))
+            newObjectThumbnailRetryJob = null
+            newObjectThumbnailRetryAtMs = null
+            if (camera !== expectedCamera || thumbnailCacheSessionGeneration != expectedGeneration) return@launch
+            if (newObjectThumbnailRetries.takeDue(SystemClock.elapsedRealtime()).isNotEmpty()) {
+                retryFailedThumbnails()
+                thumbnailFillWake.trySend(Unit)
+            }
+            scheduleNewObjectThumbnailRetryWake()
+        }
+    }
+
+    private fun deferNewObjectThumbnail(
+        file: NikonCamera.FileInfo,
+        expectedCamera: NikonCamera?,
+        expectedGeneration: Long,
+    ): Boolean {
+        if (expectedCamera == null || camera !== expectedCamera ||
+            thumbnailCacheSessionGeneration != expectedGeneration
+        ) return false
+        val retryAt = newObjectThumbnailRetries.failed(file.handle, SystemClock.elapsedRealtime()) ?: return false
+        noThumbHandles.remove(file.handle)
+        thumbnailFillQueue.markFailed(file)
+        scheduleNewObjectThumbnailRetryWake()
+        thumbnailDiagnostic(file) { "new object retry in ${(retryAt - SystemClock.elapsedRealtime()).coerceAtLeast(0L)}ms" }
+        return true
+    }
+
+    private fun publishThumbnailReady(handle: Int) {
+        val removedDeadline = newObjectThumbnailRetries.remove(handle)
+        noThumbHandles.remove(handle)
+        thumbnailFillQueue.markSettled(handle)
+        if (removedDeadline) scheduleNewObjectThumbnailRetryWake()
+        _thumbnailReadyEvents.tryEmit(handle)
+    }
 
     private suspend fun activateThumbnailDiskCache(cam: NikonCamera) {
         if (camera !== cam) return
@@ -623,6 +814,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         inflightThumbs.clear()
         inflightPrefetches.values.forEach { it.cancel() }
         inflightPrefetches.clear()
+        clearNewObjectThumbnailRetries()
         thumbnailCacheSessionGeneration++
         thumbnailFillQueue.reset()
         activeThumbnailDiskCache = null
@@ -1131,6 +1323,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val transfersBusyFlow = MutableStateFlow(false)
     private val thumbnailPriorityRangeFlow = MutableStateFlow<PhotoDateRange?>(null)
     private val thumbnailLoadingDaysFlow = MutableStateFlow(0)
+    val appliedPhotoLoadingDays: StateFlow<Int> = thumbnailLoadingDaysFlow.asStateFlow()
     /** Set when the initial catalog stopped at the selected newest-day boundary. */
     private var photoRangeScanStopped = false
 
@@ -1259,6 +1452,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         effectPreviewBitmap = thumbnail,
                         // 缩略图只是立即可见的真实占位；null 保证后续仍会升级为 FHD。
                         effectPreviewFileKey = null,
+                        effectPreviewFileName = latest.fileName,
                         effectPreviewExif = null,
                     )
                 }
@@ -1307,7 +1501,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             thumbnailPriorityRangeFlow.collect { range ->
                 thumbnailFillQueue.updatePriorityRange(range)
-                thumbnailFillQueue.retryFailed()
+                retryFailedThumbnails()
                 thumbnailFillWake.trySend(Unit)
             }
         }
@@ -1325,6 +1519,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             ) { blocked, connectionAndScan -> blocked to connectionAndScan }
                 .collectLatest { (blocked, connectionAndScan) ->
                 val (connected, scanComplete) = connectionAndScan
+                if (!connected) clearNewObjectThumbnailRetries()
                 if (blocked || !connected || !scanComplete) return@collectLatest
                 val expectedCacheGeneration = thumbnailCacheSessionGeneration
                 val expectedQueueRevision = thumbnailFillQueue.revision
@@ -1333,14 +1528,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     thumbnailPriorityRangeFlow.value,
                     newestCaptureDaysRange(state.value.files, thumbnailLoadingDaysFlow.value),
                 )
-                thumbnailFillQueue.retryFailed()
+                retryFailedThumbnails()
                 log { "THUMB_FILL resume pending=${thumbnailFillQueue.pendingCount}" }
                 var loaded = 0
                 while (currentCoroutineContext().isActive) {
                     val file = thumbnailFillQueue.poll()
                     if (file == null) {
                         thumbnailFillWake.receive()
-                        thumbnailFillQueue.retryFailed()
+                        retryFailedThumbnails()
                         continue
                     }
                     if (thumbnailDiskWritesBlocked) {
@@ -1386,7 +1581,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             // 文件从新到旧发布，第一批通常已经包含最新照片。只观察候选身份而不是整个
             // files 列表，后续枚举批次就不会反复取消同一张照片的静置等待和 FHD 请求。
             val latestStillFlow = state
-                .map { latestEffectPreviewFile(it.files) }
+                // 电量、连接和预览状态变化时文件未变，无需重新遍历整份照片目录。
+                .map { it.files }
+                .distinctUntilChanged()
+                .map(::latestEffectPreviewFile)
                 .distinctUntilChanged { previous, next ->
                     previous?.let(::effectPreviewKey) == next?.let(::effectPreviewKey)
                 }
@@ -1446,6 +1644,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             it.copy(
                                 effectPreviewBitmap = bitmap,
                                 effectPreviewFileKey = key,
+                                effectPreviewFileName = latest.fileName,
                                 effectPreviewExif = exif,
                             )
                         }
@@ -1569,6 +1768,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         wirelessCleanupJob = cleanupScope.launch {
             previousCleanup?.join()
             candidate.close()
+        }
+    }
+
+    private fun abortPendingStaCamera(candidate: NikonCamera) {
+        val previousCleanup = wirelessCleanupJob
+        wirelessCleanupJob = cleanupScope.launch {
+            // A blocked handshake does not own the normal request gate yet. Close its transport
+            // directly instead of sending CloseSession concurrently with its pending response.
+            candidate.abortStaConnectionAttempt()
+            previousCleanup?.join()
         }
     }
 
@@ -1757,7 +1966,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectApMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
-        staReconnectPreserveExisting = false
         com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         persistWirelessMode(WirelessMode.AP)
         if (current.wirelessMode == WirelessMode.AP) {
@@ -1786,7 +1994,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun selectStaMode() {
         val current = _state.value
         if (current.isConnectedToCamera || current.connectionType == CameraConnectionType.USB) return
-        staReconnectPreserveExisting = false
         persistWirelessMode(WirelessMode.STA)
         if (current.wirelessMode == WirelessMode.STA) return
 
@@ -1898,6 +2105,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val generation = ++staDiscoveryGeneration
+        val diagnosticSession = StaConnectionDiagnostics.begin()
+        StaConnectionDiagnostics.note(diagnosticSession, "discovery start reconnect=$reconnect")
         staLastFailureMessage = null
         // STA uses the phone's tether/LAN interface, not Android's client Wi-Fi Network. Keeping
         // the camera-hotspot request active can make some ROMs switch routes during the scan.
@@ -1912,8 +2121,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
         staDiscoveryJob = viewModelScope.launch {
+            var diagnosticOutcome = "cancelled"
             try {
                 wirelessCleanupJob?.join()
+                StaConnectionDiagnostics.note(diagnosticSession, "previous transport cleanup complete")
                 if (generation != staDiscoveryGeneration ||
                     _state.value.wirelessMode != WirelessMode.STA
                 ) return@launch
@@ -1924,8 +2135,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     lastIp = lastIp,
                     onProgress = { ip ->
                         if (generation == staDiscoveryGeneration) {
-                            _state.update {
-                                it.copy(
+                            _state.update { current ->
+                                // Discovery progress cannot downgrade an active camera handshake.
+                                if (current.staConnectionStatus == StaConnectionStatus.PAIRING) current
+                                else current.copy(
                                     staConnectionStatus = StaConnectionStatus.DISCOVERING,
                                     staDiscoveryProgress = ip,
                                 )
@@ -1939,6 +2152,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 localAddress = candidate.localAddress,
                                 expectedResponderGuid = expectedResponderGuid,
                                 generation = generation,
+                                diagnosticSession = diagnosticSession,
                             )
                         ) {
                             StaCandidateConnectionResult.CONNECTED -> true
@@ -1964,6 +2178,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         localAddress = candidate.localAddress,
                         expectedResponderGuid = null,
                         generation = generation,
+                        diagnosticSession = diagnosticSession,
                     ) == StaCandidateConnectionResult.CONNECTED
                 } else {
                     false
@@ -1983,27 +2198,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         scheduleStaReconnect()
                     }
                 }
+                diagnosticOutcome = if (_state.value.isConnectedToCamera) "connected" else "not_found"
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                diagnosticOutcome = "failed:${error.javaClass.simpleName}"
                 if (generation == staDiscoveryGeneration &&
                     _state.value.wirelessMode == WirelessMode.STA
                 ) {
+                    if (error is StaPairingConfirmationMissingException) {
+                        // An overlapping reconnect request may already have queued a deferred
+                        // discovery. Stop it too; confirmation failure requires an explicit retry.
+                        staReconnectJob?.cancel()
+                        staReconnectJob = null
+                    }
                     val localized = com.ztransfer.AppLocale.wrap(getApplication())
                     _state.update {
                         it.copy(
                             isConnecting = false,
                             staConnectionStatus = StaConnectionStatus.FAILED,
                             staDiscoveryProgress = null,
-                            staConnectionError = error.message
-                                ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
+                            staConnectionError = staFailureMessageResource(error, candidateKnown = false)
+                                ?.let { localized.getString(it) }
+                                ?: error.message ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
                         )
                     }
-                    if (shouldKeepStaDiscoveryAlive(reconnect, hasReusableStaProfile())) {
+                    if (shouldKeepStaDiscoveryAlive(reconnect, hasReusableStaProfile(), failure = error)) {
                         scheduleStaReconnect()
                     }
                 }
             } finally {
+                StaConnectionDiagnostics.finish(diagnosticSession, diagnosticOutcome)
                 if (generation == staDiscoveryGeneration) {
                     staDiscoveryJob = null
                     staConnectingCamera = null
@@ -2033,7 +2258,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         staDiscoveryGeneration++
         staDiscoveryJob?.cancel()
         staDiscoveryJob = null
-        staConnectingCamera?.let(::closePendingWirelessCamera)
+        staConnectingCamera?.let(::abortPendingStaCamera)
         staConnectingCamera = null
         _state.update {
             it.copy(
@@ -2050,6 +2275,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         localAddress: InetAddress?,
         expectedResponderGuid: String?,
         generation: Long,
+        diagnosticSession: Long,
     ): StaCandidateConnectionResult {
         if (generation != staDiscoveryGeneration || purchaseHold ||
             _state.value.connectionType == CameraConnectionType.USB ||
@@ -2061,136 +2287,285 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val preferredIdentity = staProfileStore.preferredIdentityFor(ip)
         var candidateKnown = staProfileStore.isKnownCandidate(ip)
         var pairedReachedStorageProbe = false
-        var pairingReconnectUsed = false
-        var pairingRecoveryUsed = false
-        var readinessRetryUsed = false
-        while (true) {
-            if (generation != staDiscoveryGeneration || purchaseHold ||
-                _state.value.wirelessMode != WirelessMode.STA
-            ) return StaCandidateConnectionResult.REJECTED
-            _state.update { current ->
-                if (current.staConnectionStatus == StaConnectionStatus.PAIRING) {
-                    current.copy(staConnectionStatus = StaConnectionStatus.CONNECTING)
-                } else {
-                    current
-                }
-            }
-            val candidateCamera = NikonCamera(localizedContext)
-            staConnectingCamera = candidateCamera
-            val result = candidateCamera.connectSta(
-                ip = ip,
-                localAddress = localAddress,
-                identity = preferredIdentity,
-                expectedResponderGuid = expectedResponderGuid,
-                allowPairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                exploreAlbumAccess = true,
-                forceProfilePairing = preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                verifyPairingCompletion = pairingReconnectUsed &&
-                    preferredIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                onConnectingStarted = {
-                    publishStaConnectingStarted(generation, ip)
-                },
-                onPairingStarted = { publishStaPairingStarted(generation, ip) },
-            )
-            if (generation != staDiscoveryGeneration || purchaseHold ||
-                _state.value.connectionType == CameraConnectionType.USB
-                || _state.value.wirelessMode != WirelessMode.STA
-                || _state.value.isConnectedToCamera
-            ) {
-                candidateCamera.close()
-                return StaCandidateConnectionResult.REJECTED
-            }
-            val route = when {
-                preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER && readinessRetryUsed ->
-                    "saved-album-ready-retry"
-                preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER -> "saved-album"
-                readinessRetryUsed -> "paired-ready-retry"
-                else -> "paired"
-            }
-            recordStaDiagnostic(ip, route, candidateCamera)
-            pairedReachedStorageProbe = pairedReachedStorageProbe ||
-                candidateCamera.staStorageProbeReached
-            candidateCamera.staResponderGuid?.let { responderGuid ->
-                candidateKnown = staProfileStore.isKnownCandidate(
-                    ip = ip,
-                    responderGuid = responderGuid,
+        // Once computer pairing begins, album access must not bypass its confirmation. A legacy
+        // album route can still recover through the authoritative computer identity below.
+        var pairingFlowStarted = false
+        var pairingConfirmation: StaPairingConfirmation? = null
+        var confirmedResponderGuid: String? = null
+
+        suspend fun waitForStaService(reason: String, durationMs: Long) {
+            val started = SystemClock.elapsedRealtime()
+            StaConnectionDiagnostics.note(diagnosticSession, "wait start reason=$reason plannedMs=$durationMs")
+            try {
+                delay(durationMs)
+            } finally {
+                StaConnectionDiagnostics.note(
+                    diagnosticSession,
+                    "wait end reason=$reason actualMs=${SystemClock.elapsedRealtime() - started}",
                 )
-            }
-            if (result.isSuccess) {
-                if (!canActivateStaSession(
-                        albumAccessValidated = candidateCamera.staAlbumAccessValidated,
-                        pairingConfirmed = candidateCamera.staPairingConfirmed,
-                    )
-                ) {
-                    staLastFailureMessage = localizedContext.getString(
-                        com.ztransfer.R.string.sta_camera_refused_repair,
-                    )
-                    staConnectingCamera = null
-                    candidateCamera.close()
-                    // A different paired body may previously have used this IP with the album
-                    // identity. Let that successful-but-unconfirmed route fall through to the
-                    // bounded paired-computer attempt instead of retrying the stale route forever.
-                    if (preferredIdentity == StaInitiatorIdentity.ALBUM_EXPLORER) break
-                    return StaCandidateConnectionResult.REJECTED
-                }
-                activateStaCamera(candidateCamera, ip, preferredIdentity)
-                return StaCandidateConnectionResult.CONNECTED
-            }
-            val error = result.exceptionOrNull()
-            if (error is UnexpectedStaResponderException) {
-                staConnectingCamera = null
-                candidateCamera.close()
-                return StaCandidateConnectionResult.UNEXPECTED_CAMERA
-            }
-            staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
-            staConnectingCamera = null
-            candidateCamera.close()
-            when {
-                error is PairingCompletedException && !pairingReconnectUsed -> {
-                    // A first-time pairing changes the camera service; the verified trace becomes
-                    // ready again roughly 6.6 seconds later.
-                    pairingReconnectUsed = true
-                    rememberStaCameraProfile(
-                        candidateCamera,
-                        ip,
-                        StaInitiatorIdentity.PAIRED_COMPUTER,
-                    )
-                    staLastFailureMessage = null
-                    delay(STA_PAIRING_RECONNECT_DELAY_MS)
-                }
-                error is PairingNotConfirmedException -> {
-                    // Do not turn a camera that is still waiting on its pairing screen into a
-                    // successful session. One bounded recovery clears the stale marker and lets
-                    // the next pass run the normal pairing handshake instead of requiring the
-                    // user to disconnect and reconnect manually.
-                    if (!pairingRecoveryUsed) {
-                        pairingRecoveryUsed = true
-                        pairingReconnectUsed = false
-                        staLastFailureMessage = null
-                        delay(STA_PAIRING_RECONNECT_DELAY_MS)
-                    } else {
-                        staLastFailureMessage = localizedContext.getString(
-                            com.ztransfer.R.string.sta_camera_refused_repair,
-                        )
-                        break
-                    }
-                }
-                isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed -> {
-                    // The camera may expose its saved-profile address before port 15740 is ready.
-                    // Retry this STA-only probe once so album validation is not skipped merely due
-                    // to that short startup window.
-                    readinessRetryUsed = true
-                    staLastFailureMessage = null
-                    delay(STA_SERVICE_READY_RETRY_DELAY_MS)
-                }
-                else -> break
             }
         }
 
-        // Try the one bounded compatibility identity after the preferred route fails. A known
-        // camera may have moved to a new DHCP address, so its GUID cannot be recovered when the
-        // first identity is rejected during InitCommand; the stored profiles tell us whether the
-        // alternate route is still in use, without generating or scanning identities.
+        suspend fun tryIdentity(
+            identity: StaInitiatorIdentity,
+            alternate: Boolean,
+        ): StaCandidateConnectionResult {
+            val pairedComputer = identity == StaInitiatorIdentity.PAIRED_COMPUTER
+            var pairingReconnectUsed = false
+            var pairingRecoveryUsed = false
+            var pairingCleanupRecoveryUsed = false
+            var readinessRetryUsed = false
+            var pairingReturnDeadlineMs = 0L
+            while (true) {
+                if (generation != staDiscoveryGeneration || purchaseHold ||
+                    _state.value.connectionType == CameraConnectionType.USB ||
+                    _state.value.wirelessMode != WirelessMode.STA ||
+                    _state.value.isConnectedToCamera
+                ) return StaCandidateConnectionResult.REJECTED
+                val candidateCamera = NikonCamera(localizedContext)
+                var pairingExchangeStarted = false
+                staConnectingCamera = candidateCamera
+                StaConnectionDiagnostics.note(
+                    diagnosticSession,
+                    "candidate start identity=${identity.name} alternate=$alternate verify=${pairingConfirmation != null} " +
+                        "remoteVerified=${pairingConfirmation?.remotePermissionVerified == true}",
+                )
+                val result = candidateCamera.connectSta(
+                    ip = ip,
+                    localAddress = localAddress,
+                    identity = identity,
+                    // A receipt belongs to this exact body, even if DHCP reuses its IP during
+                    // the camera service restart or the one bounded pairing recovery.
+                    expectedResponderGuid = confirmedResponderGuid ?: expectedResponderGuid,
+                    allowPairing = pairedComputer && pairingConfirmation?.remotePermissionVerified != true,
+                    exploreAlbumAccess = true,
+                    forceProfilePairing = pairedComputer,
+                    pairingConfirmation = pairingConfirmation.takeIf { pairedComputer },
+                    allowInlinePairingRecovery = canUseInlineStaPairingRecovery(
+                        identity, pairingConfirmation, pairingRecoveryUsed,
+                    ),
+                    onConnectingStarted = {
+                        publishStaConnectingStarted(generation, ip)
+                    },
+                    onPairingStarted = {
+                        pairingExchangeStarted = true
+                        if (pairedComputer) pairingFlowStarted = true
+                        publishStaPairingStarted(generation, ip)
+                    },
+                )
+                if (generation != staDiscoveryGeneration || purchaseHold ||
+                    _state.value.connectionType == CameraConnectionType.USB ||
+                    _state.value.wirelessMode != WirelessMode.STA ||
+                    _state.value.isConnectedToCamera
+                ) {
+                    candidateCamera.close()
+                    return StaCandidateConnectionResult.REJECTED
+                }
+                val route = when {
+                    alternate -> "alternate-${identity.name.lowercase()}"
+                    !pairedComputer && readinessRetryUsed -> "saved-album-ready-retry"
+                    !pairedComputer -> "saved-album"
+                    readinessRetryUsed -> "paired-ready-retry"
+                    else -> "paired"
+                }
+                recordStaDiagnostic(diagnosticSession, ip, route, candidateCamera)
+                pairedReachedStorageProbe = pairedReachedStorageProbe ||
+                    candidateCamera.staStorageProbeReached
+                candidateCamera.staResponderGuid?.let { responderGuid ->
+                    candidateKnown = staProfileStore.isKnownCandidate(
+                        ip = ip,
+                        responderGuid = responderGuid,
+                    )
+                }
+                if (result.isSuccess) {
+                    if (!canActivateStaSession(
+                            albumAccessValidated = candidateCamera.staAlbumAccessValidated,
+                            pairingConfirmed = candidateCamera.staPairingConfirmed,
+                        )
+                    ) {
+                        staLastFailureMessage = localizedContext.getString(
+                            com.ztransfer.R.string.sta_camera_refused_repair,
+                        )
+                        staConnectingCamera = null
+                        candidateCamera.close()
+                        // A stale saved album route may still try the authoritative computer
+                        // identity, but a computer session cannot fall back around this gate.
+                        if (pairedComputer) {
+                            throw StaPairingConfirmationMissingException(PairingNotConfirmedException())
+                        }
+                        return StaCandidateConnectionResult.REJECTED
+                    }
+                    StaConnectionDiagnostics.note(diagnosticSession, "permission verified; activating album")
+                    activateStaCamera(candidateCamera, ip, identity)
+                    StaConnectionDiagnostics.note(diagnosticSession, "album activation complete")
+                    return StaCandidateConnectionResult.CONNECTED
+                }
+                val error = result.exceptionOrNull()
+                staConnectingCamera = null
+                candidateCamera.close()
+                if (error is UnexpectedStaResponderException) {
+                    // Do not retry a different camera without the GUID guard after receiving
+                    // a confirmation for the first body at this address.
+                    if (confirmedResponderGuid != null) throw StaPairingConfirmationMissingException(error)
+                    return StaCandidateConnectionResult.UNEXPECTED_CAMERA
+                }
+                // Keep the authoritative computer-route error when a secondary album identity
+                // is refused. The paired-computer alternate supersedes a stale album-route error.
+                if (!alternate || pairedComputer || staLastFailureMessage == null) {
+                    staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
+                }
+                when {
+                    error is StaPairingConfirmationMissingException -> {
+                        pairingFlowStarted = true
+                        staLastFailureMessage = staFailureMessage(localizedContext, error, candidateKnown)
+                        // Stop this discovery and its automatic retries, not just this identity.
+                        // The user may still be confirming this body; do not pair another camera
+                        // or resend pairing merely because a reusable route hint exists.
+                        throw error
+                    }
+                    isFailedStaPairingExchange(pairingExchangeStarted, error) -> {
+                        // Do not let Query/Result timeout reach the ordinary readiness retry and
+                        // repeat an exchange whose result is unknown, including an inline repair.
+                        throw StaPairingConfirmationMissingException(error)
+                    }
+                    error is PairingCompletedException -> {
+                        pairingFlowStarted = true
+                        if (!pairedComputer || pairingConfirmation?.remotePermissionVerified == true ||
+                            (confirmedResponderGuid != null &&
+                                confirmedResponderGuid != error.confirmation.responderGuid)
+                        ) {
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        if (error.isRecovery) {
+                            if (!canUseInlineStaPairingRecovery(identity, pairingConfirmation, pairingRecoveryUsed)) {
+                                throw StaPairingConfirmationMissingException(error)
+                            }
+                            // An inline repair and a later frame-failure repair are alternatives,
+                            // never two separate chances to send pairing again.
+                            pairingRecoveryUsed = true
+                        } else if (pairingReconnectUsed) {
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        pairingReconnectUsed = true
+                        pairingConfirmation = error.confirmation
+                        confirmedResponderGuid = error.confirmation.responderGuid
+                        // Some bodies stay offline until the user presses OK after they join the
+                        // network. Later attempts reuse this receipt until the return window ends.
+                        pairingReturnDeadlineMs = staPairingReturnDeadlineMs(
+                            error.confirmation.resultAcknowledgedAtMs,
+                            SystemClock.elapsedRealtime(),
+                            STA_PAIRING_RETURN_WINDOW_MS,
+                        )
+                        rememberStaCameraProfile(candidateCamera, ip, StaInitiatorIdentity.PAIRED_COMPUTER)
+                        staLastFailureMessage = null
+                        waitForStaService(
+                            if (error.isRecovery) "post_inline_pairing_restart" else "post_pairing_restart",
+                            remainingStaPairingRestartDelay(
+                                error.confirmation.resultAcknowledgedAtMs,
+                                SystemClock.elapsedRealtime(),
+                                STA_PAIRING_RECONNECT_DELAY_MS,
+                            ),
+                        )
+                    }
+                    error is StaPairingCleanupException -> {
+                        pairingFlowStarted = true
+                        if (!canRecoverStaPairingCleanup(
+                                identity, pairingConfirmation, error.confirmation, pairingCleanupRecoveryUsed,
+                            )
+                        ) {
+                            StaConnectionDiagnostics.note(diagnosticSession, "live-view cleanup recovery rejected; stopping without new pairing")
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        pairingCleanupRecoveryUsed = true
+                        pairingConfirmation = error.confirmation
+                        confirmedResponderGuid = error.confirmation.responderGuid
+                        staLastFailureMessage = null
+                        StaConnectionDiagnostics.note(diagnosticSession, "remote permission verified; reconnecting once after live-view cleanup failure")
+                        waitForStaService("pairing_cleanup_recovery", STA_SERVICE_READY_RETRY_DELAY_MS)
+                    }
+                    shouldRetryStaPairingReturn(
+                        confirmation = pairingConfirmation,
+                        exchangeStarted = pairingExchangeStarted,
+                        failure = error,
+                        nowMs = SystemClock.elapsedRealtime(),
+                        deadlineMs = pairingReturnDeadlineMs,
+                    ) -> {
+                        val remainingMs = (pairingReturnDeadlineMs - SystemClock.elapsedRealtime())
+                            .coerceAtLeast(0L)
+                        val delayMs = minOf(STA_PAIRING_RETURN_RETRY_DELAY_MS, remainingMs)
+                        StaConnectionDiagnostics.note(
+                            diagnosticSession,
+                            "camera offline after pairing; keeping receipt remainingMs=$remainingMs " +
+                                "delayMs=$delayMs error=${error?.javaClass?.simpleName}",
+                        )
+                        staLastFailureMessage = null
+                        waitForStaService("pairing_return", delayMs)
+                    }
+                    error is PairingNotConfirmedException -> {
+                        if (pairedComputer) {
+                            pairingFlowStarted = true
+                            // Legacy-marker repair may not have a receipt yet. Its next connection
+                            // must still target the body that reported the failure.
+                            confirmedResponderGuid = confirmedResponderGuid ?: candidateCamera.staResponderGuid
+                        }
+                        // Keep the existing single recovery, discarding the old receipt but
+                        // retaining its camera GUID. Another failure must never try album access.
+                        if (canRetryUnconfirmedStaPairing(pairingConfirmation, pairingRecoveryUsed, error)) {
+                            pairingRecoveryUsed = true
+                            pairingReconnectUsed = false
+                            pairingConfirmation = null
+                            staLastFailureMessage = null
+                            waitForStaService("pairing_recovery", STA_PAIRING_RECONNECT_DELAY_MS)
+                        } else if (canRetryStaPairingReadFailure(error, readinessRetryUsed) &&
+                            (!alternate || pairingConfirmation != null)
+                        ) {
+                            readinessRetryUsed = true
+                            staLastFailureMessage = null
+                            StaConnectionDiagnostics.note(diagnosticSession, "pairing verification read failed; preserving receipt for one service retry")
+                            waitForStaService("pairing_verification_read_retry", STA_SERVICE_READY_RETRY_DELAY_MS)
+                        } else {
+                            if (pairingConfirmation?.remotePermissionVerified == true) {
+                                StaConnectionDiagnostics.note(diagnosticSession, "remote-verified session could not recover; stopping without new pairing")
+                                throw StaPairingConfirmationMissingException(error)
+                            }
+                            // A legacy album identity may still use its paired-computer route.
+                            if (!shouldBlockStaAlbumFallback(identity, pairingFlowStarted)) {
+                                return StaCandidateConnectionResult.REJECTED
+                            }
+                            // Exhausted the one pairing recovery. Stop the entire discovery,
+                            // including saved-profile auto retries, rather than looping forever.
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                    }
+                    isTransientStaServiceReadinessFailure(error) && !readinessRetryUsed &&
+                        (!alternate || pairingConfirmation != null) -> {
+                        // Preserve the preferred route's startup retry. A newly confirmed
+                        // alternate computer route gets the same bounded post-pairing retry.
+                        readinessRetryUsed = true
+                        staLastFailureMessage = null
+                        waitForStaService("service_ready_retry", STA_SERVICE_READY_RETRY_DELAY_MS)
+                    }
+                    else -> {
+                        // A failed recovery handshake (including Query/Result rejection) must
+                        // not restart indefinitely through saved-profile auto discovery either.
+                        if (pairedComputer && pairingFlowStarted) {
+                            throw StaPairingConfirmationMissingException(error)
+                        }
+                        return StaCandidateConnectionResult.REJECTED
+                    }
+                }
+            }
+        }
+
+        val preferredResult = tryIdentity(preferredIdentity, alternate = false)
+        if (preferredResult != StaCandidateConnectionResult.REJECTED) return preferredResult
+        if (shouldBlockStaAlbumFallback(preferredIdentity, pairingFlowStarted)) {
+            return StaCandidateConnectionResult.REJECTED
+        }
+
+        // Preserve existing paired routes' compatibility retry, including legacy album routes
+        // whose validation failed. The alternate computer identity must use the complete bounded
+        // confirmation/reconnect flow; it cannot inherit trust from that failed album attempt.
         val alternateIdentity = when (preferredIdentity) {
             StaInitiatorIdentity.PAIRED_COMPUTER -> StaInitiatorIdentity.ALBUM_EXPLORER
             StaInitiatorIdentity.ALBUM_EXPLORER -> StaInitiatorIdentity.PAIRED_COMPUTER
@@ -2201,86 +2576,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             generation == staDiscoveryGeneration &&
             _state.value.wirelessMode == WirelessMode.STA
         ) {
-            delay(STA_EXPLORER_RECONNECT_DELAY_MS)
-            val alternateCamera = NikonCamera(localizedContext)
-            staConnectingCamera = alternateCamera
-            val alternateResult = alternateCamera.connectSta(
-                ip = ip,
-                localAddress = localAddress,
-                identity = alternateIdentity,
-                expectedResponderGuid = expectedResponderGuid,
-                allowPairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                exploreAlbumAccess = true,
-                forceProfilePairing = alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                verifyPairingCompletion = pairingReconnectUsed &&
-                    alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER,
-                onConnectingStarted = {
-                    publishStaConnectingStarted(generation, ip)
-                },
-                onPairingStarted = { publishStaPairingStarted(generation, ip) },
-            )
-            recordStaDiagnostic(
-                ip,
-                "alternate-${alternateIdentity.name.lowercase()}",
-                alternateCamera,
-            )
-            alternateCamera.staResponderGuid?.let { responderGuid ->
-                candidateKnown = staProfileStore.isKnownCandidate(
-                    ip = ip,
-                    responderGuid = responderGuid,
-                )
-            }
-            if (generation != staDiscoveryGeneration || purchaseHold ||
-                _state.value.connectionType == CameraConnectionType.USB ||
-                _state.value.wirelessMode != WirelessMode.STA ||
-                _state.value.isConnectedToCamera
-            ) {
-                alternateCamera.close()
-                return StaCandidateConnectionResult.REJECTED
-            }
-            if (alternateResult.isSuccess) {
-                if (!canActivateStaSession(
-                        albumAccessValidated = alternateCamera.staAlbumAccessValidated,
-                        pairingConfirmed = alternateCamera.staPairingConfirmed,
-                    )
-                ) {
-                    staLastFailureMessage = localizedContext.getString(
-                        com.ztransfer.R.string.sta_camera_refused_repair,
-                    )
-                    staConnectingCamera = null
-                    alternateCamera.close()
-                    return StaCandidateConnectionResult.REJECTED
-                }
-                activateStaCamera(alternateCamera, ip, alternateIdentity)
-                return StaCandidateConnectionResult.CONNECTED
-            }
-            if (alternateResult.exceptionOrNull() is UnexpectedStaResponderException) {
-                staConnectingCamera = null
-                alternateCamera.close()
-                return StaCandidateConnectionResult.UNEXPECTED_CAMERA
-            }
-            if (alternateResult.exceptionOrNull() is PairingCompletedException) {
-                rememberStaCameraProfile(
-                    alternateCamera,
-                    ip,
-                    StaInitiatorIdentity.PAIRED_COMPUTER,
-                )
-                staLastFailureMessage = null
-            }
-            // The paired-computer route is authoritative. Preserve its failure when the secondary
-            // album identity is intentionally rejected; replace an album-first failure when this
-            // authoritative paired route was the alternate attempt.
-            if (alternateIdentity == StaInitiatorIdentity.PAIRED_COMPUTER ||
-                staLastFailureMessage == null
-            ) {
-                staLastFailureMessage = staFailureMessage(
-                    localizedContext,
-                    alternateResult.exceptionOrNull(),
-                    candidateKnown,
-                )
-            }
-            staConnectingCamera = null
-            alternateCamera.close()
+            waitForStaService("alternate_identity", STA_EXPLORER_RECONNECT_DELAY_MS)
+            return tryIdentity(alternateIdentity, alternate = true)
         }
 
         // A monitor-only PTP profile is not a successful photo-browser connection. Activating it
@@ -2297,6 +2594,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 current.wirelessMode != WirelessMode.STA ||
                 current.connectionType == CameraConnectionType.USB ||
                 current.isConnectedToCamera ||
+                // A pairing ACK is not completion: keep the label through reconnect, remote
+                // permission verification and recovery. Activation/failure/cancellation ends it.
                 current.staConnectionStatus == StaConnectionStatus.PAIRING
             ) {
                 current
@@ -2335,26 +2634,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         context: Context,
         error: Throwable?,
         candidateKnown: Boolean,
-    ): String? = when (error) {
-        is CameraRefusedException -> if (candidateKnown) {
-            context.getString(com.ztransfer.R.string.sta_camera_refused_retrying)
-        } else {
-            context.getString(com.ztransfer.R.string.sta_camera_refused_repair)
-        }
-        null -> null
-        else -> error.message ?: error.javaClass.simpleName
-    }
+    ): String? = staFailureMessageResource(error, candidateKnown)?.let { context.getString(it) }
+        ?: error?.let { it.message ?: it.javaClass.simpleName }
 
     private fun recordStaDiagnostic(
+        diagnosticSession: Long,
         ip: String,
         route: String,
         candidateCamera: NikonCamera,
     ) {
-        val report = candidateCamera.staDiagnosticReport.takeIf(String::isNotBlank) ?: return
-        val labeled = "[$ip / $route]\n$report"
-        if (PhotoGenerationProbe.enabled) {
-            PhotoGenerationProbe.note("STA", labeled)
-        }
+        if (!StaConnectionDiagnostics.enabled) return
+        StaConnectionDiagnostics.attempt(diagnosticSession, "$ip / $route", candidateCamera.staDiagnosticReport)
     }
 
     private suspend fun activateStaCamera(
@@ -2370,8 +2660,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         ) {
             "STA camera must validate album access and pairing before activation"
         }
-        val preserveExisting = staReconnectPreserveExisting
-        staReconnectPreserveExisting = false
         staConnectingCamera = null
         staReconnectAttempt = 0
         camera = candidateCamera
@@ -2390,16 +2678,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 staConnectionStatus = StaConnectionStatus.IDLE,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
-                // Publish the album's loading state atomically with the connection. Otherwise a
-                // slow reconnect can expose the previous session's completed-empty state for a
-                // frame and send the user straight to the false "no photos" screen.
+                // A new connection starts with a fresh catalog, even during recovery. Publish
+                // the empty catalog and loading state together before suspending for cache IO,
+                // so neither old photos nor a false "no photos" state flash before the scan.
                 isLoadingFiles = true,
                 hasCompletedFileScan = false,
-                files = if (preserveExisting) it.files else emptyList(),
-                storageIds = if (preserveExisting) it.storageIds else emptyList(),
-                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
-                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
-                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
+                files = emptyList(),
+                storageIds = emptyList(),
+                effectPreviewBitmap = null,
+                effectPreviewFileKey = null,
+                effectPreviewFileName = null,
+                effectPreviewExif = null,
             )
         }
         CameraSessionService.start(getApplication())
@@ -2413,10 +2702,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             log { "STA thumbnail cache unavailable: ${error.javaClass.simpleName}" }
         }
         if (camera !== candidateCamera || !_state.value.isConnectedToCamera) return
-        loadFiles(
-            preserveExisting = preserveExisting,
-            detectNewHandles = preserveExisting,
-        )
+        loadFiles()
         startEventPolling()
     }
 
@@ -2820,6 +3106,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         currentHandles: Set<Int>,
     ): List<NikonCamera.FileInfo> {
         removedHandles.forEach { handle ->
+            newObjectThumbnailRetries.remove(handle)
             indexedCameraFiles.remove(handle)
             thumbnailCache.remove(handle)
             noThumbHandles.remove(handle)
@@ -2827,6 +3114,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             inflightPrefetches.remove(handle)?.cancel()
             pendingNewObjectHandles.remove(handle)
         }
+        scheduleNewObjectThumbnailRetryWake()
         thumbnailFillQueue.removeHandles(removedHandles)
         val reconciled = reconcilePublishedCameraFiles(
             publishedFiles = _state.value.files,
@@ -2885,6 +3173,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     val cam = pendingNewObjectCamera
                     if (cam == null || camera !== cam) {
                         pendingNewObjectHandles.clear()
+                        pendingNewObjectCamera = null
+                        break
+                    }
+                    // A completed batch needs no full-album handle set just to discover that
+                    // nothing is pending. Keep the post-deduplication check below as well.
+                    if (pendingNewObjectHandles.isEmpty()) {
                         pendingNewObjectCamera = null
                         break
                     }
@@ -3036,9 +3330,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         if (camera !== cam) return
         val hasKnownBaseline = knownHandlesCamera === cam
         indexedCameraFiles[handle] = info
+        val newIdentity = info.logicalIdentity()
         val previousState = _state.getAndUpdate { state ->
             val duplicateIndex = state.files.indexOfFirst {
-                it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
+                it.handle == handle || it.logicalIdentity() == newIdentity
             }
             if (duplicateIndex < 0) {
                 state.copy(files = listOf(info) + state.files)
@@ -3051,10 +3346,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
         val added = previousState.files.none {
-            it.handle == handle || it.logicalIdentity() == info.logicalIdentity()
+            it.handle == handle || it.logicalIdentity() == newIdentity
         }
         if (knownHandlesCamera === cam) knownHandles += handle
         if (added && hasKnownBaseline && knownHandlesCamera === cam) {
+            // ObjectInfo can become readable before the just-written JPEG's GetThumb is ready.
+            // Register before the first suspension/auto-transfer so a transient miss is not permanent.
+            newObjectThumbnailRetries.register(handle)
+            noThumbHandles.remove(handle)
             if (isAutoTransferMedia(info)) {
                 _newMediaFiles.emit(NewCameraMedia(cam, listOf(info)))
             }
@@ -3088,12 +3387,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         detectNewHandles: Boolean = false,
     ) {
         val cam = camera ?: return
+        // Handles and their dates belong to one PTP session. Only same-session refreshes
+        // can reuse them; a reconnect must start a fresh shooting-day scan.
+        val preserveCatalog = preserveExisting && knownHandlesCamera === cam
+        val reusableSnapshot = resumeSnapshot?.takeIf { preserveCatalog && it.belongsTo(cam) }
         _recentThumbnailReady.value = false
         _recentThumbnailReadyDays.value = 0
-        if (!preserveExisting && resumeSnapshot == null) cam.invalidatePhotoRatings()
+        if (!preserveCatalog) cam.invalidatePhotoRatings()
         val diskCacheForScan = activeThumbnailDiskCache
         photoRangeScanStopped = false
-        if (cam.staDirectObjectReadValidated && !preserveExisting) {
+        if (cam.staDirectObjectReadValidated && !preserveCatalog) {
             staScanThumbnailDiskHits = 0
             staScanThumbnailDiskMisses = 0
         }
@@ -3103,8 +3406,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         fileLoadPending = true
         // 没有显式传入同会话恢复快照，就代表本轮要重新读取 handles；旧快照不能在
         // 新一轮枚举尚未完成时被后续暂停误复用。
-        if (resumeSnapshot == null) fileScanHandleSnapshot = null
-        if (!preserveExisting) {
+        if (reusableSnapshot == null) fileScanHandleSnapshot = null
+        if (!preserveCatalog) {
+            clearNewObjectThumbnailRetries()
             knownHandlesCamera = null
             knownHandles.clear()
             indexedCameraFiles.clear()
@@ -3122,20 +3426,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isLoadingFiles = !isFileScanPaused(),
                 hasCompletedFileScan = false,
-                files = if (preserveExisting) it.files else emptyList(),
-                storageIds = if (preserveExisting) it.storageIds else emptyList(),
-                effectPreviewBitmap = if (preserveExisting) it.effectPreviewBitmap else null,
-                effectPreviewFileKey = if (preserveExisting) it.effectPreviewFileKey else null,
-                effectPreviewExif = if (preserveExisting) it.effectPreviewExif else null,
+                files = if (preserveCatalog) it.files else emptyList(),
+                storageIds = if (preserveCatalog) it.storageIds else emptyList(),
+                effectPreviewBitmap = if (preserveCatalog) it.effectPreviewBitmap else null,
+                effectPreviewFileKey = if (preserveCatalog) it.effectPreviewFileKey else null,
+                effectPreviewFileName = if (preserveCatalog) it.effectPreviewFileName else null,
+                effectPreviewExif = if (preserveCatalog) it.effectPreviewExif else null,
             )
         }
         // 监看和交互式大图都先于列表枚举：保留待加载标记，不向相机事务调度器排队。
         if (isFileScanPaused()) return
 
         if (FileOrderProbe.enabled) {
-            if (resumeSnapshot == null) {
+            if (reusableSnapshot == null) {
                 FileOrderProbe.beginScan(
-                    "fresh preserveExisting=$preserveExisting existing=${_state.value.files.size}"
+                    "fresh preserveExisting=$preserveCatalog existing=${_state.value.files.size}"
                 )
             } else {
                 FileOrderProbe.addNote(
@@ -3145,8 +3450,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         log {
-            "FILE_SCAN start preserve=$preserveExisting snapshot=${resumeSnapshot != null} " +
-                "existing=${_state.value.files.size}"
+            "FILE_SCAN start preserve=$preserveCatalog snapshot=${reusableSnapshot != null} " +
+                "existing=${_state.value.files.size} days=${thumbnailLoadingDaysFlow.value}"
         }
         val job = viewModelScope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var staScanRequiresReconnect = false
@@ -3156,11 +3461,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 check(!cam.remoteControlModeSet && !cam.remoteMovieApplicationPropSet &&
                     !cam.remoteMovieApplicationOpSet) { "Camera remote mode release is unconfirmed" }
                 var existingFiles =
-                    if (preserveExisting && camera === cam) _state.value.files else emptyList()
+                    if (preserveCatalog && camera === cam) _state.value.files else emptyList()
                 var existingHandles = existingFiles.asSequence().map { it.handle }.toHashSet()
                 var newHandlesToReport: Set<Int> = emptySet()
                 val scanDiscoveredMedia = ArrayList<NikonCamera.FileInfo>()
-                val reusableSnapshot = resumeSnapshot?.takeIf { it.belongsTo(cam) }
                 val storageIds: List<Int>
                 val remainingHandleOrders: List<StorageHandleOrder>
                 val activeSnapshot: FileScanHandleSnapshot
@@ -3480,16 +3784,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     val publishedSizeBeforeBatch = publishedFiles.size
                     val configuredDays = thumbnailLoadingDaysFlow.value
-                    val observedDates = (publishedFiles.asSequence() + batch.asSequence())
-                        .mapNotNull { it.captureDate?.take(8) }
-                        .distinct()
-                        .toList()
-                    val rangeBoundaryReached = configuredDays > 0 &&
-                        observedDates.size > configuredDays
                     val currentRange = newestCaptureDaysRange(
                         (publishedFiles.asSequence() + batch.asSequence()).asIterable(),
                         configuredDays,
                     )
+                    val rangeBoundaryReached = crossedPhotoLoadingRange(currentRange, batch)
                     val acceptedBatch = if (rangeBoundaryReached && currentRange != null) {
                         batch.filter { file ->
                             file.captureDate == null || currentRange.containsCaptureDate(file.captureDate)
@@ -3767,14 +4066,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun onCameraTransportLost(failedCamera: NikonCamera) {
         if (camera !== failedCamera) return
-        if (failedCamera.connectionType == CameraConnectionType.WIFI &&
-            _state.value.wirelessMode == WirelessMode.STA &&
-            (_state.value.files.isNotEmpty() || _state.value.hasCompletedFileScan)
-        ) {
-            // The next STA session is a recovery of the same connected camera. Keep the visible
-            // catalog and let the new session re-enumerate handles with preserveExisting=true.
-            staReconnectPreserveExisting = true
-        }
         fileLoadJob?.cancel()
         camera = null
         keepaliveJob?.cancel()
@@ -3848,10 +4139,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             loadThumbnailFromDisk(file)?.let { return it }
         }
+        if (!newObjectThumbnailRetries.canAttempt(handle, SystemClock.elapsedRealtime())) return null
         // 复用进行中的请求（跳过已被取消但尚未从表中清理的条目）。
         val entry = inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }
             ?: InflightThumb(viewModelScope.async { fetchAndDecodeThumb(file) })
                 .also { inflightThumbs[handle] = it }
+        return awaitInflightThumbnail(handle, entry)
+    }
+
+    private suspend fun awaitInflightThumbnail(handle: Int, entry: InflightThumb): ImageBitmap? {
         entry.waiters++
         try {
             return entry.deferred.await()   // 调用方被取消时在此抛出并传播，不能吞掉
@@ -3893,15 +4189,21 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (cached != null) {
             onCacheHit()
+            if (camera === expectedCamera && thumbnailCacheSessionGeneration == expectedCacheGeneration) {
+                publishThumbnailReady(handle)
+            }
             return true
         }
+        if (!newObjectThumbnailRetries.canAttempt(handle, SystemClock.elapsedRealtime())) return false
         // 所有格式都随当前批次取图；STA 的 NEF/视频同样走有界读取，不跳过或假报完成。
         if (thumbnailDiskWritesBlocked) return false
         // 可见格子正在取同一张：共乘同一次请求（结果会自动落盘）。作为共同等待者，
         // 即使格子滚出屏幕取消了自己的等待，本次共乘也会把请求保活到完成——
         // 用户来回翻动导致的“格子请求发出又取消”绝不会让这张图两头落空。
-        if (inflightThumbs[handle]?.deferred?.isCancelled == false) {
-            return loadThumbnail(file) != null || handle in noThumbHandles
+        inflightThumbs[handle]?.takeIf { !it.deferred.isCancelled }?.let { entry ->
+            // 直接加入已知请求；重走 loadThumbnail 的磁盘入口，会在该请求刚落盘、
+            // 尚未解码完时并发解码同一张图，并重复准备纹理与发布 ready 通知。
+            return awaitInflightThumbnail(handle, entry) != null || handle in noThumbHandles
         }
         inflightPrefetches[handle]?.let { return it.await() }
         val completion = CompletableDeferred<Boolean>()
@@ -3918,6 +4220,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             result
         } catch (e: Throwable) {
             if (e !is CancellationException) {
+                deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)
                 thumbnailDiagnostic(file, failure = true) {
                     "background failed ${e.javaClass.simpleName}: ${e.message}"
                 }
@@ -3992,15 +4295,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             if (camera !== expectedCamera) return@withPermit null
             thumbnailDiagnostic(file) { "request background" }
             if (FileOrderProbe.enabled) {
-                getRemoteThumbnailProbed(expectedCamera, handle, "background")
+                getRemoteThumbnailProbed(expectedCamera, file, "background")
             } else {
-                expectedCamera.getThumbnail(handle, visible = false)
+                expectedCamera.getThumbnail(
+                    handle, visible = false, file = file,
+                    retryNewObject = newObjectThumbnailRetries.isRetry(handle),
+                )
             }
         }   // 瞬时失败会抛出，由扫描循环按单张失败处理
         if (camera !== expectedCamera ||
             thumbnailCacheSessionGeneration != expectedCacheGeneration
         ) return false
         if (bytes == null || bytes.isEmpty()) {
+            if (deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)) return false
             // 与可见格子的取图规则一致：STA RAW/视频的有界探测可能只是暂未取到，
             // 不能写入“确认无图”缓存或标记完成；保留后续补漏/可见加载的重试机会。
             if (expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg") {
@@ -4026,22 +4333,30 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             thumbnailDiskWritesBlocked = true
             log { "THUMB_CACHE write failed; stop background fill for this connection" }
         }
+        if (written && camera === expectedCamera &&
+            thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+            activeThumbnailDiskCache === diskCache
+        ) publishThumbnailReady(handle)
         return written
     }
 
     /** 仅包裹现有 GetThumb 事务记录实际进相机通道的顺序；Debug 不增加任何相机请求。 */
     private suspend fun getRemoteThumbnailProbed(
         cam: NikonCamera,
-        handle: Int,
+        file: NikonCamera.FileInfo,
         lane: String,
     ): ByteArray? {
+        val handle = file.handle
         val sequence = if (FileOrderProbe.enabled) {
             FileOrderProbe.beginThumbnail(handle, lane)
         } else {
             -1
         }
         return try {
-            val bytes = cam.getThumbnail(handle, visible = lane == "visible")
+            val bytes = cam.getThumbnail(
+                handle, visible = lane == "visible", file = file,
+                retryNewObject = newObjectThumbnailRetries.isRetry(handle),
+            )
             if (FileOrderProbe.enabled) {
                 FileOrderProbe.finishThumbnail(
                     sequence = sequence,
@@ -4158,18 +4473,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val diskCache = activeThumbnailDiskCache ?: return null
         val expectedCacheGeneration = thumbnailCacheSessionGeneration
         val cacheFileName = thumbnailDiskCacheFileName(file)
-        val disk = withContext(Dispatchers.IO) {
+        val cached = withContext(Dispatchers.IO) {
             diskCache.findCachedFile(
                 cacheFileName,
                 legacyThumbnailDiskCacheFileName(file),
                 alternateThumbnailDiskCacheFileName(file),
-            )
+            )?.let { disk ->
+                // Keep file lookup and stat in one IO visit. Retain a failed stat with its file
+                // so the existing cancellation/error handling below can clean the right cache.
+                disk to runCatching {
+                    if (disk.isFile) runCatching { disk.length() }.getOrDefault(0L) else 0L
+                }
+            }
         } ?: return null
         if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
+        val disk = cached.first
         return try {
-            val encodedSize = withContext(Dispatchers.IO) {
-                if (disk.isFile) runCatching { disk.length() }.getOrDefault(0L) else 0L
-            }
+            val encodedSize = cached.second.getOrThrow()
             if (encodedSize <= 0L) {
                 withContext(Dispatchers.IO) { diskCache.remove(cacheFileName, disk) }
                 thumbnailDiagnostic(file, failure = true) { "disk empty; bad cache removed" }
@@ -4198,27 +4518,34 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private suspend fun fetchAndDecodeThumb(file: NikonCamera.FileInfo): ImageBitmap? {
         val handle = file.handle
+        val expectedCamera = camera
+        val expectedCacheGeneration = thumbnailCacheSessionGeneration
         return try {
             // 创建共享远程请求前已经查过一次磁盘；排队期间后台可能刚好写入，再查一次
             // 可避免一条重复的 GetThumb。
             loadThumbnailFromDisk(file)?.let { return it }
-            val expectedCamera = camera ?: return null
-            val expectedCacheGeneration = thumbnailCacheSessionGeneration
+            if (expectedCamera == null ||
+                !newObjectThumbnailRetries.canAttempt(handle, SystemClock.elapsedRealtime())
+            ) return null
             val diskCache = activeThumbnailDiskCache
             val cacheFileName = thumbnailDiskCacheFileName(file)
             val bytes = remoteThumbGate.withPermit {
                 if (camera !== expectedCamera) return@withPermit null
                 thumbnailDiagnostic(file) { "request visible" }
                 if (FileOrderProbe.enabled) {
-                    getRemoteThumbnailProbed(expectedCamera, handle, "visible")
+                    getRemoteThumbnailProbed(expectedCamera, file, "visible")
                 } else {
-                    expectedCamera.getThumbnail(handle, visible = true)
+                    expectedCamera.getThumbnail(
+                        handle, visible = true, file = file,
+                        retryNewObject = newObjectThumbnailRetries.isRetry(handle),
+                    )
                 }
             }
             if (camera !== expectedCamera ||
                 thumbnailCacheSessionGeneration != expectedCacheGeneration
             ) return null
             if (bytes == null || bytes.isEmpty()) {
+                if (deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)) return null
                 // Direct STA RAW/video only performed a bounded fallback probe. Null is not the
                 // camera's authoritative NoThumbnail response, so a later visible retry remains valid.
                 if (!(expectedCamera.staDirectObjectReadValidated && file.extension != ".jpg")) {
@@ -4255,6 +4582,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             throw e
         } catch (e: Exception) {
             // IO 瞬时失败（掉线等）：不负缓存，重连后仍可加载
+            deferNewObjectThumbnail(file, expectedCamera, expectedCacheGeneration)
             thumbnailDiagnostic(file, failure = true) {
                 "visible failed ${e.javaClass.simpleName}: ${e.message}"
             }
@@ -4336,6 +4664,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             if (!fromDisk &&
                 thumbnailCacheSessionGeneration == expectedCacheGeneration &&
+                !deferNewObjectThumbnail(file, camera, expectedCacheGeneration) &&
                 !(camera?.staDirectObjectReadValidated == true && file.extension != ".jpg")
             ) {
                 noThumbHandles.add(file.handle)
@@ -4351,6 +4680,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (thumbnailCacheSessionGeneration != expectedCacheGeneration) return null
         thumbnailCache.put(file.handle, image)
+        publishThumbnailReady(file.handle)
         thumbnailDiagnostic(file) {
             "decoded source=${if (fromDisk) "disk" else "remote"} bytes=$encodedSize " +
                 "image=${image.width}x${image.height}"
@@ -4574,7 +4904,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     suspend fun loadExif(file: NikonCamera.FileInfo): PhotoExif? {
         val key = exifKey(file)
         // containsKey 区分"未尝试"与"已尝试但为 null（负缓存）"——?.let 无法区分。
-        if (key in exifCache) return exifCache[key]
+        if (key in exifCache) return exifCache[key].also { metadata ->
+            if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+                com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(file.fileName, "preview-exif",
+                    "cached=true parsed=${metadata != null} gps=${com.ztransfer.frame.validFrameCoordinates(metadata?.latitude, metadata?.longitude)}")
+            }
+        }
         // 非图片格式（视频、音频等）不包含 JPEG EXIF，直接负缓存避免浪费 PTP 请求。
         val ext = file.extension
         if (ext !in EXIF_SUPPORTED_EXTENSIONS) {
@@ -4587,10 +4922,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val maxSize = if (ext in LARGE_EXIF_HEADER_EXTENSIONS) 2048 * 1024 else 128 * 1024
         val bytes = cam.readExifHeader(file.handle, maxSize) ?: run {
             exifCache[key] = null
+            if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+                com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(file.fileName, "preview-exif", "header=unavailable")
+            }
             return null
         }
-        return parseExif(bytes)?.also { exifCache[key] = it }
-            ?: run { exifCache[key] = null; null }
+        val metadata = parseExif(bytes)
+        exifCache[key] = metadata
+        if (com.ztransfer.diagnostics.PhotoLocationDiagnostics.enabled) {
+            com.ztransfer.diagnostics.PhotoLocationDiagnostics.record(file.fileName, "preview-exif",
+                "headerBytes=${bytes.size} parsed=${metadata != null} gps=${com.ztransfer.frame.validFrameCoordinates(metadata?.latitude, metadata?.longitude)}")
+        }
+        return metadata
     }
 
     /**
@@ -4804,6 +5147,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     override fun onCleared() {
+        clearNewObjectThumbnailRetries()
         com.ztransfer.frame.PhotoFrameLocationResolver.apBlocked.value = true
         super.onCleared()
         CameraSessionService.stop(getApplication())
@@ -4813,7 +5157,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         usbPermissionJob?.cancel()
         staDiscoveryJob?.cancel()
         staReconnectJob?.cancel()
-        staConnectingCamera?.let { cleanupScope.launch { it.close() } }
+        staConnectingCamera?.let(::abortPendingStaCamera)
         apConnectingCamera?.let { cleanupScope.launch { it.close() } }
         if (wifiHeld) releaseWifiNetworkRequest()
         if (usbReceiverRegistered) {
@@ -4848,6 +5192,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         const val WIFI_BACKGROUND_RETRY_INTERVAL_MS = 3_000L
         const val WATCH_INTERVAL_MS = 1_000L
         const val STA_PAIRING_RECONNECT_DELAY_MS = 6_600L
+        // Covers camera restart plus the on-body OK some cameras require before they return.
+        const val STA_PAIRING_RETURN_WINDOW_MS = 60_000L
+        const val STA_PAIRING_RETURN_RETRY_DELAY_MS = 1_200L
         const val STA_SERVICE_READY_RETRY_DELAY_MS = 1_200L
         const val STA_EXPLORER_RECONNECT_DELAY_MS = 900L
         const val FILE_SCAN_RETRY_DELAY_MS = 750L

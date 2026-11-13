@@ -43,8 +43,12 @@ import javax.net.ssl.HttpsURLConnection
 object LicenseManager {
 
     // ==================== 部署产出的常量(见 server/部署指南.md)====================
-    // 临时地址。ztransfer.top 备案通过后改回 https://api.ztransfer.top。
-    private val SERVERS = listOf("https://www.au9999.net")
+    // 先走自己的域名。连不上再试临时域名，两个地址目前是同一台服务器。
+    // 临时域名撤掉之前，已更新的客户端仍能用第一地址，不会断。
+    private val SERVERS = listOf(
+        "https://api.ztransfer.top",
+        "https://www.au9999.net",
+    )
     // setup-keys.js init 输出的"App 内置公钥"(ECDSA P-256 SPKI)。这是通行证签名公钥，与 TLS 证书无关。
     private const val PUBLIC_KEY_B64 =
         "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEqiQGFyGSVfCF2d96gr9wEQcjhOzQ1Iyxbeml+4uEYLiWDSEmf0AstKOnvg2YNIKPg25bLaY+xg5hrvLPhBks3w=="

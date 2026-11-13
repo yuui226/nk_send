@@ -38,6 +38,7 @@ data class Np3PhotoFilterParameters(
     val saturation: Int,
     val colorBands: List<PhotoFilterColorBand>,
     val toneCurve: IntArray? = null,
+    val colorGrading: Np3ColorGrading = Np3ColorGrading(),
 ) : PhotoFilterParameters {
     init {
         listOf(contrast, highlights, shadows, whites, blacks, saturation).forEach {
@@ -66,14 +67,17 @@ data class PhotoFilterColorBand(
 data class PhotoFilterSelection(
     val preset: PhotoFilterPreset,
     val intensityPercent: Int,
-    /** Per-LUT finishing controls. Non-LUT presets keep the neutral value. */
+    /** Per-preset finishing controls, applied after the filter/LUT strength blend. */
     val lutAdjustments: LutAdjustments = LutAdjustments(),
 ) {
     val normalizedIntensityPercent: Int
         get() = normalizePhotoFilterIntensity(intensityPercent)
 }
 
-/** Small, deterministic post-LUT controls shared by preview and export. */
+/**
+ * Finishing controls shared by every filter/LUT, preview and export. The original LUT-facing
+ * type/property names remain stable for saved recipes; zero preserves the existing pixels.
+ */
 data class LutAdjustments(
     val contrast: Int = 0,
     val saturation: Int = 0,

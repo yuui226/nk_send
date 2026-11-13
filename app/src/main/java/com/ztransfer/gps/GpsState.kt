@@ -30,6 +30,13 @@ data class GpsState(
     val message: String? = null,
 )
 
+/** UI eligibility only; the service must also verify the live camera session. */
+internal val GpsState.canSyncNow: Boolean
+    get() = enabled && latitude != null && longitude != null && when (status) {
+        GpsStatus.PAIRING_SUCCESS, GpsStatus.CONNECTED, GpsStatus.WAITING_FIX, GpsStatus.READY -> true
+        else -> false
+    }
+
 internal enum class GpsRecoveryTarget {
     LOCATION_ONLY,
     FULL_CONNECTION,

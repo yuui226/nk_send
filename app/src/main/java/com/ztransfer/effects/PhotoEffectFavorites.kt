@@ -14,6 +14,7 @@ import com.ztransfer.frame.normalizePhotoFrameWatermarkOpacityPercent
 import com.ztransfer.frame.normalizePhotoFrameWatermarkSizePercent
 import com.ztransfer.frame.validPhotoFrameWatermarkImageHash
 import com.ztransfer.filter.normalizePhotoFilterIntensity
+import com.ztransfer.filter.isCustomPhotoFilterCatalogKey
 
 data class FavoritePhotoFilter(val catalogKey: String)
 
@@ -97,6 +98,8 @@ internal const val PHOTO_FILTER_INTENSITIES_PREFERENCE_KEY = "photo_filter_inten
 private const val ENTRY_SEPARATOR = ";"
 private const val FIELD_SEPARATOR = ","
 private val FAVORITE_CATALOG_KEY = Regex("[A-Za-z0-9._-]{1,128}")
+private fun validFavoriteCatalogKey(key: String): Boolean =
+    FAVORITE_CATALOG_KEY.matches(key) || isCustomPhotoFilterCatalogKey(key)
 
 internal fun encodeFavoritePhotoFilters(favorites: List<FavoritePhotoFilter>): String =
     favorites.joinToString(ENTRY_SEPARATOR) { it.catalogKey }
@@ -110,9 +113,9 @@ internal fun decodeFavoritePhotoFilters(
     return encoded.split(ENTRY_SEPARATOR).mapNotNull { entry ->
         // v1 stored "catalogKey,intensity". Intensity now belongs exclusively to the
         // entry-specific intensity map, so legacy favorites retain only their ordering key.
-        val key = entry.substringBefore(FIELD_SEPARATOR).takeIf(FAVORITE_CATALOG_KEY::matches)
+        val key = entry.substringBefore(FIELD_SEPARATOR).takeIf(::validFavoriteCatalogKey)
             ?: return@mapNotNull null
-        if (key !in validCatalogKeys || !seen.add(key)) {
+        if ((key !in validCatalogKeys && !isCustomPhotoFilterCatalogKey(key)) || !seen.add(key)) {
             return@mapNotNull null
         }
         FavoritePhotoFilter(key)
@@ -122,7 +125,7 @@ internal fun decodeFavoritePhotoFilters(
 /** Stable catalog key -> last user-selected intensity. Display names are deliberately not keys. */
 internal fun encodePhotoFilterIntensities(intensities: Map<String, Int>): String =
     intensities.entries
-        .filter { (key, _) -> FAVORITE_CATALOG_KEY.matches(key) }
+        .filter { (key, _) -> validFavoriteCatalogKey(key) }
         .sortedBy { it.key }
         .joinToString(ENTRY_SEPARATOR) { (key, intensity) ->
             "$key$FIELD_SEPARATOR${normalizePhotoFilterIntensity(intensity)}"
@@ -136,9 +139,9 @@ internal fun decodePhotoFilterIntensities(
     val restored = linkedMapOf<String, Int>()
     encoded.split(ENTRY_SEPARATOR).forEach { entry ->
         val fields = entry.split(FIELD_SEPARATOR)
-        val key = fields.getOrNull(0)?.takeIf(FAVORITE_CATALOG_KEY::matches)
+        val key = fields.getOrNull(0)?.takeIf(::validFavoriteCatalogKey)
             ?: return@forEach
-        if (fields.size != 2 || key !in validCatalogKeys || key in restored) return@forEach
+        if (fields.size != 2 || (key !in validCatalogKeys && !isCustomPhotoFilterCatalogKey(key)) || key in restored) return@forEach
         val intensity = fields[1].toIntOrNull() ?: return@forEach
         restored[key] = normalizePhotoFilterIntensity(intensity)
     }

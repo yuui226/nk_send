@@ -14,12 +14,13 @@
     <string name="sta_reset_pairing_message">This app will forget all paired cameras. Recreate the “Connect to computer” profile on each camera, then pair again.</string>
     <string name="sta_status_searching">Searching</string>
     <string name="sta_status_pairing">Pairing</string>
+    <string name="sta_pairing_incomplete">Pairing incomplete. Check the camera and retry.</string>
     <string name="sta_status_connecting">Connecting</string>
     <string name="sta_status_connected">Connected</string>
-    <string name="sta_camera_not_found_short">Camera not found</string>
+    <string name="sta_camera_check_photos">The card may have no photos.</string>
     <string name="sta_camera_not_found">No compatible camera found. Check the camera network profile and connection.</string>
     <string name="sta_camera_no_media">No photos or videos were returned by the camera. Capture something to the memory card, then try again.</string>
-    <string name="sta_camera_refused_repair">Camera refused the connection. Pair the camera again.</string>
+    <string name="sta_camera_refused_repair">Camera refused the connection. Create a new network profile on the camera and pair again.</string>
     <string name="sta_camera_refused_retrying">Camera is not ready yet. Keep it powered on; reconnection will retry automatically.</string>
     <string name="sta_signal_connected">STA camera connected</string>
     <string name="sta_signal_disconnected_reconnect">STA camera disconnected. Tap to reconnect.</string>
@@ -58,6 +59,7 @@
     <string name="tip_body">Add “Wi-Fi connection” to the camera\'s i menu, then press i to turn it on quickly.</string>
     <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
     <string name="tip_sta_title">STA connection guide</string>
+    <string name="tip_sta_no_mobile_data">Photo transfers do not use mobile data.</string>
     <string name="tip_sta_first_connection">First connection</string>
     <string name="tip_sta_quick_start">Start “Wi-Fi connection” from the i menu</string>
     <string name="tip_sta_step_hotspot">1. Phone: start an English-named hotspot (5 GHz recommended</string>
@@ -78,6 +80,7 @@
     <string name="return_again_to_exit">Go back again to exit</string>
     <string name="no_photos_match_filter">No photos match the filter</string>
     <string name="clear_filters">Clear filters</string>
+    <string name="reset_filters">Reset filters</string>
     <string name="loading_more">Loading more…</string>
     <string name="unknown_date">Unknown date</string>
     <string name="filter_all">All</string>
@@ -88,13 +91,10 @@
     <string name="filter_title">Filter</string>
     <string name="filter_section_file_type">File type</string>
     <string name="filter_section_status">Status</string>
-    <string name="filter_section_storage">Storage card</string>
     <string name="filter_section_date">Date taken</string>
     <string name="filter_date">Date</string>
     <string name="filter_storage_slot">Card %1$d</string>
     <string name="date_range">Date range</string>
-    <string name="date_start">Start</string>
-    <string name="date_end">End</string>
     <string name="date_year">Year</string>
     <string name="date_month">Month</string>
     <string name="date_day">Day</string>
@@ -112,6 +112,11 @@
     <!-- Transfer queue -->
     <string name="status_waiting">Waiting</string>
     <string name="queue_pill_generating">Generating</string>
+    <string name="queue_focus_waiting_transfer">Waiting to transfer</string>
+    <string name="queue_summary_idle">Idle</string>
+    <string name="queue_summary_paused">Paused</string>
+    <string name="queue_summary_download_remaining">%1$d transfer tasks remaining</string>
+    <string name="queue_summary_generation_remaining">%1$d generation tasks remaining</string>
     <string name="status_generation_duration">Generation %1$s</string>
     <string name="status_skipped">Skipped</string>
     <string name="status_cancelled">Cancelled</string>
@@ -126,7 +131,7 @@
     <string name="retry_failed_title">Retry failed tasks?</string>
     <string name="cd_clear_queue">Clear queue</string>
     <string name="clear_queue_title">Clear the queue?</string>
-    <string name="clear_queue_subtitle">Removes all cards; the file currently transferring is not affected</string>
+    <string name="clear_queue_subtitle">Keeps the current transfer and queued or running effects</string>
 
     <!-- Settings -->
     <string name="settings">Settings</string>
@@ -268,17 +273,19 @@
     <string name="photo_frame_effect_shadow">Shadow</string>
     <string name="photo_frame_effect_outline">Outline</string>
     <string name="photo_filter">Photo filter</string>
-    <string name="photo_effects">Filter · LUT · Frame · Watermark</string>
+    <string name="photo_effects">Effects</string>
     <string name="photo_effects_editor_title">Effects</string>
     <string name="photo_effects_open_editor">Edit photo effects</string>
     <string name="photo_effects_info_title">About photo effects</string>
     <string name="photo_effects_info_description">JPG/JPEG only; RAW and video are unchanged. Originals are preserved and edited copies saved separately. Changes apply to photos queued next.</string>
-    <string name="photo_effects_gesture_hint">Tap to enlarge, double-tap to rotate, and hold to compare color adjustments.</string>
+    <string name="photo_effects_gesture_hint">Tap to enlarge, double-tap to rotate, and hold to compare color and grain effects.</string>
     <string name="photo_effects_wheel_hint">Drag up or down for quick adjustments, or tap to change options.</string>
     <string name="photo_effects_full_chooser_hint">Hold the photo filter wheel to choose by category</string>
     <string name="photo_filter_off_option">No filter</string>
     <string name="photo_filter_intensity_summary">%1$d%%</string>
     <string name="photo_filter_intensity">Intensity</string>
+    <string name="photo_filter_settings">Adjust</string>
+    <string name="photo_color_reset">Reset adjustments</string>
     <string name="photo_filter_task_label">Filter: %1$s · %2$d%%</string>
     <string name="photo_effect_favorite_add">Add current effect to favorites</string>
     <string name="photo_effect_favorite_remove">Remove current effect from favorites</string>
@@ -336,7 +343,7 @@
 
     <!-- Transfer errors -->
     <string name="error_dir_invalid">Transfer folder is no longer valid. Please choose it again</string>
-    <string name="error_camera_connection_lost">Camera connection lost — retry to resume after reconnecting</string>
+    <string name="error_camera_connection_lost">Camera disconnected. Reconnect and retry.</string>
     <string name="error_camera_metadata_unavailable">Could not read photo details from the camera. Please retry.</string>
     <string name="error_create_file">Couldn\'t create file</string>
     <string name="error_open_file">Couldn\'t open file</string>
@@ -500,7 +507,7 @@
     <string name="purchase_open_link">Open payment page</string>
     <string name="purchase_qr_expired">Payment timed out</string>
     <string name="purchase_qr_refresh">Start payment again</string>
-    <string name="renewal_needed">Pro license expired — connect to the internet and reopen to renew automatically.</string>
+    <string name="renewal_needed">No network</string>
     <!-- Subscription expiry (settings renewal entry/dialog + connection-page expiry tag) -->
     <string name="sub_expires_on">Expires %1$s</string>
     <string name="renew_action">Renew</string>
@@ -564,10 +571,10 @@
     <string name="update_manual_copied">Update manually. Copied to clipboard</string>
     <string name="update_failure_manual">%1$s. %2$s</string>
     <string name="update_open_download_page">Open download page</string>
-    <string name="local_photo_effects_entry">Filter · LUT · Frame · Watermark</string>
+    <string name="local_photo_effects_entry">Effects</string>
     <string name="local_photo_effects_info_description">Select multiple photos to apply the same effects. Edited photos are saved as new copies.</string>
     <string name="local_photo_effects_exif_hint">Frame: Images without EXIF data, such as screenshots, won’t show shooting details</string>
-    <string name="local_photo_effects_gesture_hint">Tap to enlarge, swipe between photos, and hold to compare color adjustments.</string>
+    <string name="local_photo_effects_gesture_hint">Tap to enlarge, swipe between photos, and hold to compare color and grain effects.</string>
     <string name="local_photo_multi_select">(Select multiple photos)</string>
     <string name="local_photo_reselect">Choose again (%1$d)</string>
     <string name="local_photo_batch_generating">Generating</string>
@@ -595,6 +602,7 @@
     <string name="gps_place_unavailable">Couldn’t find a place name. Try again later.</string>
     <string name="gps_altitude_value">Altitude: %1$d m</string>
     <string name="gps_update_frequency_label">Update frequency</string>
+    <string name="gps_sync_now">Sync now</string>
     <string name="gps_frequency_30_seconds">30 sec</string>
     <string name="gps_frequency_1_minute">1 min</string>
     <string name="gps_frequency_2_minutes">2 min</string>
@@ -686,6 +694,11 @@
     <string name="photo_effect_module_watermark">Watermark</string>
 
     <string name="remote_tool_focus_frame">Focus frame</string>
+    <string name="remote_tool_self_timer">Self-timer</string>
+    <string name="remote_self_timer_seconds">%1$ds</string>
+    <string name="remote_self_timer_focus_failed">Focus failed. Please try again.</string>
+    <string name="remote_self_timer_capture_failed">Capture failed. Please try again.</string>
+    <string name="monitor_help_tool_self_timer">When enabled, press and release the shutter to start the countdown; press again to cancel. The camera focuses and takes a photo when the countdown ends. Manual focus is kept as set. Photo mode only.</string>
     <string name="remote_focus_diagnostic_start">Start</string>
     <string name="remote_focus_diagnostic_stop">Stop</string>
     <string name="remote_focus_diagnostic_mark">Mark step</string>
@@ -699,13 +712,13 @@
     <string name="photo_lut_highlights">Highlights</string>
     <string name="photo_lut_shadows">Shadows</string>
     <string name="photo_lut_concentration">Concentration</string>
-    <string name="photo_lut_settings">LUT settings</string>
+    <string name="photo_lut_settings">Adjust</string>
     <string name="filter_rating_stars">%1$d stars</string>
     <string name="filter_rating_enabled">Rating filter</string>
     <string name="filter_rating_help_title">Star rating</string>
     <string name="filter_rating_range_all">all</string>
     <string name="filter_rating_range_days">%1$d days</string>
-    <string name="filter_rating_range_label">Range</string>
+    <string name="filter_rating_range_label">Rating load range</string>
     <string name="filter_rating_waiting">Waiting</string>
     <string name="filter_rating_help_description">Enable to load ratings in the selected range and filter photos by rating. Turn it off and on again to reload the latest ratings.</string>
     <string name="filter_rating_off">Off</string>
@@ -714,4 +727,12 @@
     <string name="remote_review_empty">No photos</string>
     <string name="remote_review_retry">Load failed · Retry</string>
     <string name="remote_review_disconnected">Camera disconnected</string>
+    <string name="photo_grain">Film grain</string>
+    <string name="photo_grain_fine">Fine grain</string>
+    <string name="photo_grain_medium">Medium grain</string>
+    <string name="photo_grain_coarse">Coarse grain</string>
+    <string name="photo_grain_intensity_summary">%1$s %2$d%%</string>
+    <string name="photo_grain_hint">Choose a grain size and adjust its strength. Each size remembers its own strength.</string>
+    <string name="remote_review_follow">Follow latest</string>
+    <string name="remote_review_follow_on">Automatically show new photos</string>
 </resources>

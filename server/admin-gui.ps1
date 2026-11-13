@@ -112,13 +112,11 @@ function Start-CoreWorker([string]$operation, [hashtable]$payload, [string]$busy
             'stage' {
                 $target = New-OssReleaseTarget $data.Meta
                 if (-not (Upload-VersionedApkToOss $data.ApkPath $data.Meta $target)) { throw 'OSS 上传失败。' }
-                if (-not (Test-PublicOssApk $target.PublicUrl $data.Meta)) { throw '公网对象校验失败。' }
                 [PSCustomObject]@{ Ok=$true; Url=$target.PublicUrl; VersionName=$data.Meta.VersionName }
             }
             'publish' {
                 $target = New-OssReleaseTarget $data.Meta
                 if (-not (Upload-VersionedApkToOss $data.ApkPath $data.Meta $target)) { throw '版本 APK 上传失败。' }
-                if (-not (Test-PublicOssApk $target.PublicUrl $data.Meta)) { throw '版本 APK 公网校验失败。' }
 
                 $latestState = Get-UpdatePublishState
                 if (-not $latestState) { throw '无法再次确认服务端版本，已停止发布。' }
@@ -127,7 +125,6 @@ function Start-CoreWorker([string]$operation, [hashtable]$payload, [string]$busy
                     throw '上传期间服务端版本已变化，已停止发布，避免覆盖错误版本。'
                 }
                 if (-not (Copy-VersionedApkToLatest $data.Meta $target)) { throw '固定下载地址更新失败。' }
-                if (-not (Test-PublicOssApk $target.LatestPublicUrl $data.Meta)) { throw '固定下载地址校验失败。' }
 
                 $draft = @{
                     versionCode=[int]$data.Meta.VersionCode; versionName=[string]$data.Meta.VersionName
@@ -805,10 +802,10 @@ function Invoke-GuiStage {
         $summary = "版本 $($meta.VersionName)（versionCode $($meta.VersionCode)）`n大小 $(([double]$meta.SizeBytes/1MB).ToString('0.00')) MiB`n`n仅上传版本化测试地址，不会覆盖 ZTransfer.apk，也不会改变 App 当前版本。"
         Set-Busy $false
         if (-not (Confirm-Action $summary '确认上传测试包')) { return }
-        Start-CoreWorker 'stage' @{ ApkPath=$apk; Meta=$meta } '正在上传并校验测试包…' {
+        Start-CoreWorker 'stage' @{ ApkPath=$apk; Meta=$meta } '正在上传测试包…' {
             param($result)
             try { [Windows.Clipboard]::SetText([string]$result.Url) } catch {}
-            Show-Notice "测试包已上传并校验通过，地址已复制：`n$($result.Url)" '上传完成'
+            Show-Notice "测试包已上传，地址已复制：`n$($result.Url)" '上传完成'
             Set-Footer '测试包上传完成，当前发布未改变'
         }
         $backgroundStarted = $true
@@ -848,7 +845,7 @@ function Invoke-GuiPublish {
         Start-CoreWorker 'publish' @{
             ApkPath=$apk; Meta=$meta; InitialVersionCode=$initialCode
             MinSupportedVersionCode=$minSupported; Notes=[string]$form.Notes
-        } '正在上传、校验并发布新版本…' {
+        } '正在上传并发布新版本…' {
             param($result)
             Show-Notice "版本 $($result.VersionName) 已正式发布。" '发布成功'
             Refresh-UpdateData

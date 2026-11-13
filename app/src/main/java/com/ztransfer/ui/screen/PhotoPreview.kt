@@ -17,6 +17,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material3.IconButton
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -53,7 +55,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.DisposableEffect
@@ -70,10 +72,16 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Matrix
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -83,7 +91,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -103,6 +110,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -124,13 +132,17 @@ import com.ztransfer.protocol.PtpConstants
 import com.ztransfer.ui.theme.*
 import com.ztransfer.ui.util.formatFileSize
 import com.ztransfer.ui.util.rememberHaptics
+import com.ztransfer.ui.util.LocalHapticsEnabled
 import com.ztransfer.viewmodel.CameraViewModel
+import com.ztransfer.viewmodel.CameraState
 import com.ztransfer.viewmodel.PhotoExif
 import com.ztransfer.viewmodel.ActiveTransferProgress
 import com.ztransfer.viewmodel.TransferTask
 import com.ztransfer.viewmodel.TransferViewModel
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 // 视频扩展名：无高清封面，预览走"压暗缩略图 + 视频占位"分支。
 // 注意与 CameraViewModel.VIDEO_EXTENSIONS（封面黑边兜底）保持同步。
@@ -154,6 +166,19 @@ private data class PreviewEffectsRequest(
     val file: NikonCamera.FileInfo,
     val anchor: Rect?,
     val rotationQuarterTurns: Int,
+)
+
+/** The pager needs connectivity and camera labels, not catalog or signal-strength updates. */
+private data class PreviewCameraUiState(
+    val isConnectedToCamera: Boolean,
+    val cameraManufacturer: String?,
+    val cameraModel: String?,
+)
+
+private fun CameraState.toPreviewCameraUiState() = PreviewCameraUiState(
+    isConnectedToCamera = isConnectedToCamera,
+    cameraManufacturer = cameraManufacturer,
+    cameraModel = cameraModel,
 )
 
 internal fun showPreviewPhotoEffects(
@@ -328,6 +353,8 @@ internal fun PhotoPreviewOverlay(
     queueTaskFor: (NikonCamera.FileInfo) -> TransferTask? = { null },
     isTransferred: (NikonCamera.FileInfo) -> Boolean = { false },
     activeProgressFlow: StateFlow<ActiveTransferProgress?>,
+    // A partly visible thumbnail still keeps its full Crop geometry; clip only its visible part.
+    anchorVisibleRect: Rect? = anchorRect,
     // 根坐标中的真实队列胶囊承载区；预览残影使用它计算与列表一致的弧线落点。
     queueTargetBounds: Rect? = null,
     onQueueFlightStarted: (Int) -> Unit = {},
@@ -345,14 +372,18 @@ internal fun PhotoPreviewOverlay(
     onRotationChanged: (Int) -> Unit = {},
     onHistogramModeChanged: (HistogramMode) -> Unit = {},
     // 关闭前让底层列表把当前照片准备到可见位置，并返回它最新的根坐标。
-    prepareDismissTarget: suspend (NikonCamera.FileInfo) -> Rect? = { null },
+    prepareDismissTarget: suspend (NikonCamera.FileInfo) -> PreviewAnchorBounds? = { null },
     // 非空表示当前照片已在底层列表找到，可在预览消失后播放定位脉冲。
     onDismiss: (NikonCamera.FileInfo?) -> Unit
 ) {
     // 会话内固定持有自己的分页快照；后台增量加载/筛选不会让正在看的页突然换内容。
     // 只有用户在合集页主动展开/收起时，才在当前页后插入/移除该组成员。
     var previewItems by remember { mutableStateOf(items) }
-    LaunchedEffect(items) { if (review != null) previewItems = items }
+    var appliedFollowRevision by remember { mutableStateOf(review?.followRevision ?: 0) }
+    var followingLatest by remember { mutableStateOf(false) }
+    var pendingFollowHandle by remember { mutableStateOf<Int?>(null) }
+    val followVisibility = remember { Animatable(1f) }
+    var followIncoming by remember { mutableStateOf(false) }
     val latestReview by rememberUpdatedState(review)
     val landscapeReview = review?.landscape == true
     val reviewTap = remember { PreviewReviewTapGuard() }
@@ -360,6 +391,11 @@ internal fun PhotoPreviewOverlay(
     // This overlay is an ephemeral open request, not a restorable workspace page. A saveable
     // pager would restore the previous photo after visiting the queue, overriding initialIndex.
     val pagerState = remember { PagerState(initialIndex, 0f) { previewItems.size } }
+    val pagingSettled by remember(pagerState) {
+        derivedStateOf {
+            !pagerState.isScrollInProgress && abs(pagerState.currentPageOffsetFraction) < .01f
+        }
+    }
     val currentItem = previewItems.getOrNull(pagerState.currentPage)
     val currentFile = (currentItem as? PhotoPreviewItem.Photo)?.file
     val currentHandle = currentFile?.handle
@@ -371,11 +407,30 @@ internal fun PhotoPreviewOverlay(
     var cropRetry by remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     val previewScope = rememberCoroutineScope()
-    val cameraState by cameraViewModel.state.collectAsState()
+    val cameraState by remember(cameraViewModel) {
+        cameraViewModel.state.map(CameraState::toPreviewCameraUiState).distinctUntilChanged()
+    }.collectAsStateWithLifecycle(
+        initialValue = cameraViewModel.state.value.toPreviewCameraUiState(),
+    )
     val currentTransfersBusy by rememberUpdatedState(transfersBusy)
     var previousTransfersBusy by remember { mutableStateOf(transfersBusy) }
     var overlayBounds by remember { mutableStateOf<Rect?>(null) }
-    var collapseAnchorRect by remember { mutableStateOf(anchorRect) }
+    // Opening owns a fixed source rectangle. Background catalog/filter updates may invalidate
+    // the caller's live anchor, but must not switch an in-flight image to full size mid-animation.
+    val openingAnchorRect = remember { anchorRect }
+    val openingAnchorClip = remember { anchorVisibleRect ?: anchorRect }
+    val openingFile = remember { (items.getOrNull(initialIndex) as? PhotoPreviewItem.Photo)?.file }
+    // Keep the exact decoded source alive until PreviewPage owns it; don't race cache eviction.
+    val openingThumbnail = remember { openingFile?.let { cameraViewModel.cachedThumbnail(it.handle) } }
+    val needsOpeningPlacement = review == null && openingAnchorRect != null &&
+        openingThumbnail != null && openingFile?.extension !in VIDEO_EXTENSIONS
+    var openingPlacement by remember { mutableStateOf<PreviewImagePlacement?>(null) }
+    var closingPlacement by remember { mutableStateOf<PreviewImagePlacement?>(null) }
+    val openingReady = !needsOpeningPlacement || openingPlacement != null
+    val anchorClipPath = remember { Path() }
+    val anchorClipMatrix = remember { Matrix() }
+    var collapseAnchorRect by remember { mutableStateOf(openingAnchorRect) }
+    var collapseAnchorClip by remember { mutableStateOf(openingAnchorClip) }
     val progress = remember { Animatable(0f) }
     var closing by remember { mutableStateOf(false) }
     var burstTransitionBusy by remember { mutableStateOf(false) }
@@ -387,13 +442,19 @@ internal fun PhotoPreviewOverlay(
     // 等动画完成会让 FHD、EXIF 和远程缩略图全部永久不启动。
     var deferredLoadsEnabled by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(overlayBounds != null) {
+        if (overlayBounds == null || deferredLoadsEnabled) return@LaunchedEffect
+        // Start with the actual opening layout, not its earlier initial composition. Give the
+        // final animation frame a bounded grace period; a stalled frame clock cannot block FHD.
         delay(PREVIEW_DEFERRED_LOAD_DELAY_MS)
+        withTimeoutOrNull(120L) {
+            androidx.compose.runtime.snapshotFlow { progress.value >= 1f }.first { it }
+        }
         if (!closing) deferredLoadsEnabled = true
     }
 
-    LaunchedEffect(overlayBounds, closing) {
-        if (!closing && overlayBounds != null && progress.value < 1f) {
+    LaunchedEffect(overlayBounds, openingReady, closing) {
+        if (!closing && openingReady && overlayBounds != null && progress.value < 1f) {
             progress.animateTo(1f, Motion.overlayExpand)
         }
     }
@@ -409,7 +470,9 @@ internal fun PhotoPreviewOverlay(
             // 长列表的远距离预定位发生在不透明预览层之后；随后才向最新格子坐标缩回，
             // 因此既不会暴露 LazyGrid 的长距离跳段，也不会飞回已经失效的旧格位。
             val returnFile = latestCurrentFile
-            collapseAnchorRect = returnFile?.let { latestPrepareDismissTarget(it) }
+            val returnBounds = returnFile?.let { latestPrepareDismissTarget(it) }
+            collapseAnchorRect = returnBounds?.image
+            collapseAnchorClip = returnBounds?.visible
             progress.animateTo(0f, Motion.overlayCollapse)
             latestOnDismiss(returnFile.takeIf { collapseAnchorRect != null })
         }
@@ -510,11 +573,15 @@ internal fun PhotoPreviewOverlay(
     val startClose: () -> Unit = {
         if (effectsRequest == null) {
             if (cropFile != null) closeCrop()
-            else if (!burstTransitionBusy && !cropRestoring) closing = true
+            else if (!burstTransitionBusy && !cropRestoring && !closing) {
+                closingPlacement = previewPlacement.takeIf { currentFile?.extension !in VIDEO_EXTENSIONS }
+                closing = true
+            }
         }
     }
     BackHandler(enabled = !closing && effectsRequest == null) { startClose() }
-    val previewGesturesEnabled = effectsRequest == null && cropFile == null && !cropRestoring && cropLayoutProgress.value == 0f
+    val previewGesturesEnabled = !followingLatest && !closing && effectsRequest == null && cropFile == null &&
+        !cropRestoring && cropLayoutProgress.value == 0f
     LaunchedEffect(cropFile,cropRetry,cropFile?.handle?.let(highResolutionBitmaps::get),cropFile?.handle?.let(fhdUnavailable::get),cameraState.isConnectedToCamera) {
         val file=cropFile
         if(file==null) {
@@ -614,8 +681,12 @@ internal fun PhotoPreviewOverlay(
     // 不重新读取相机，也不创建列表 QueueFlight；抵达时仅触发现有胶囊视觉回弹。
     var reportedZoomed by remember { mutableStateOf(false) }
     // Photo paging reads the same state as pinch/crop restoration, without a callback delay.
-    val currentZoomed = if (currentItem is PhotoPreviewItem.Photo)
-        previewViewport.scale.floatValue > 1.01f else reportedZoomed
+    val currentZoomed by remember(currentItem, previewViewport) {
+        derivedStateOf {
+            if (currentItem is PhotoPreviewItem.Photo) previewViewport.scale.floatValue > 1.01f
+            else reportedZoomed
+        }
+    }
     var queueGestureActive by remember { mutableStateOf(false) }
     var queueAnimating by remember { mutableStateOf(false) }
     var queueOffsetY by remember { mutableFloatStateOf(0f) }
@@ -916,9 +987,9 @@ internal fun PhotoPreviewOverlay(
         page: Int,
         awaitExisting: Boolean = false,
         allowCameraRequest: Boolean,
+        targetFile: NikonCamera.FileInfo? = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file,
     ): Boolean {
-        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
-            ?: return false
+        val file = targetFile ?: return false
         val h = file.handle
         if (file.extension in VIDEO_EXTENSIONS) {
             fhdUnavailable[h] = true
@@ -957,6 +1028,42 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
+    LaunchedEffect(items, review?.followRevision, review?.followLatest) {
+        if (review == null) return@LaunchedEffect
+        val follow = review.followRevision != appliedFollowRevision
+        try {
+            if (follow && review.followLatest) {
+                val target = (items.firstOrNull() as? PhotoPreviewItem.Photo)?.file
+                pendingFollowHandle = target?.handle
+                if (target != null) {
+                    cameraViewModel.withInteractivePreviewPriority {
+                        loadHighResolutionPage(0, awaitExisting = true,
+                            allowCameraRequest = cameraState.isConnectedToCamera, targetFile = target)
+                    }
+                }
+                // Keep the current photo and gestures until the incoming image is decoded.
+                if (target == null || highResolutionBitmaps[target.handle] == null) return@LaunchedEffect
+                followIncoming = false
+                followingLatest = true
+                reviewTap.cancel()
+                pagerState.stopScroll(androidx.compose.foundation.MutatePriority.PreventUserInput)
+                followVisibility.animateTo(0f, tween(100, easing = FastOutSlowInEasing))
+            }
+            previewItems = items
+            if (followingLatest) {
+                // A short fade/slide has constant duration even when browsing hundreds of photos.
+                pagerState.scrollToPage(0)
+                followIncoming = true
+                followVisibility.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+            }
+            appliedFollowRevision = review.followRevision
+        } finally {
+            pendingFollowHandle = null
+            followingLatest = false
+            followVisibility.snapTo(1f)
+        }
+    }
+
     // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
     suspend fun loadExifPage(page: Int) {
         val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
@@ -980,7 +1087,7 @@ internal fun PhotoPreviewOverlay(
         val keep = (cp - 2).coerceAtLeast(0)..(cp + 2).coerceAtMost(previewItems.lastIndex)
         val keepH = keep.mapNotNull { page ->
             (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file?.handle
-        }.toSet()
+        }.toSet() + listOfNotNull(pendingFollowHandle)
         highResolutionBitmaps.keys
             .filter { it !in keepH }
             .forEach { highResolutionBitmaps.remove(it) }
@@ -1063,9 +1170,14 @@ internal fun PhotoPreviewOverlay(
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     reviewTap.begin(down.position)
+                    var interrupted = followingLatest
                     do {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        reviewTap.observe(event.changes.map { it.position }, viewConfiguration.touchSlop)
+                        interrupted = interrupted || followingLatest
+                        if (interrupted) {
+                            reviewTap.cancel()
+                            event.changes.forEach { it.consume() }
+                        } else reviewTap.observe(event.changes.map { it.position }, viewConfiguration.touchSlop)
                     } while (event.changes.any { it.pressed })
                 }
             }
@@ -1159,31 +1271,46 @@ internal fun PhotoPreviewOverlay(
                 .fillMaxSize()
                 .graphicsLayer {
                     val ob = overlayBounds
-                    val ar = if (closing) collapseAnchorRect else anchorRect
+                    val ar = if (closing) collapseAnchorRect else openingAnchorRect
                     val queueLift =
                         (-queueOffsetY / queueSwipeTriggerPx).coerceIn(0f, 1.24f)
                     val queueScale = 1f - min(queueLift, 1f) * 0.055f
                     val queueAlpha = 1f - min(queueLift, 1f) * 0.07f
                     var baseScale = 1f
                     var baseAlpha = progress.value
+                    var baseTranslation = Offset.Zero
+                    transformOrigin = TransformOrigin.Center
+                    rotationZ = 0f
                     // 打开阶段只认最初格子；关闭阶段已经重新定位并测得当前照片的新坐标，
                     // 因此翻页后也能缩回正在看的那张，而不是退回旧格位或只做无方向淡出。
                     val shrinkToAnchor = if (closing) ar != null
                         else pagerState.currentPage == initialIndex
                     if (shrinkToAnchor && ob != null && ar != null && ob.width > 0f && ob.height > 0f) {
-                        transformOrigin = TransformOrigin(
-                            (ar.center.x - ob.left) / ob.width,
-                            (ar.center.y - ob.top) / ob.height
-                        )
-                        val startScale = (ar.width / ob.width).coerceIn(0.05f, 1f)
-                        baseScale = startScale + (1f - startScale) * progress.value
+                        val placement = if (closing) closingPlacement else openingPlacement
+                        if (placement != null) {
+                            val frame = previewAnchorFrame(ar.translate(-ob.topLeft), placement.image,
+                                progress.value, placement.rotation,
+                                ((if (closing) collapseAnchorClip else openingAnchorClip) ?: ar).translate(-ob.topLeft))
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            baseScale = frame.scale
+                            baseTranslation = frame.translation
+                            rotationZ = frame.rotation
+                        } else {
+                            // Collections/videos retain their existing whole-page transition.
+                            transformOrigin = TransformOrigin(
+                                (ar.center.x - ob.left) / ob.width,
+                                (ar.center.y - ob.top) / ob.height
+                            )
+                            val startScale = (ar.width / ob.width).coerceIn(0.05f, 1f)
+                            baseScale = startScale + (1f - startScale) * progress.value
+                        }
                         // 打开首帧就绘制已缓存的源缩略图，避免 overlay 已挂载但动画尚未
                         // 前进时整块图片透明、短暂透出照片列表。关闭时仍随缩回过程淡出，
                         // 与底层原格子自然交接。
                         baseAlpha = if (closing) {
                             (progress.value * 1.6f).coerceAtMost(1f)
                         } else {
-                            1f
+                            if (openingReady) 1f else 0f
                         }
                     }
                     if (queueLift > 0f || burstPagerScale.value != 1f) {
@@ -1191,9 +1318,33 @@ internal fun PhotoPreviewOverlay(
                     }
                     scaleX = baseScale * queueScale * burstPagerScale.value
                     scaleY = baseScale * queueScale * burstPagerScale.value
-                    translationX = size.width * burstPagerSlide.value
-                    translationY = queueOffsetY
-                    alpha = baseAlpha * queueAlpha * burstPagerAlpha.value
+                    // Navigate toward the newest photo on the left: old exits right, new enters left.
+                    translationX = baseTranslation.x + size.width * burstPagerSlide.value +
+                        36.dp.toPx() * (1f - followVisibility.value) * (if (followIncoming) -1f else 1f)
+                    translationY = baseTranslation.y + queueOffsetY
+                    alpha = baseAlpha * queueAlpha * burstPagerAlpha.value * followVisibility.value
+                }
+                .drawWithContent {
+                    val ob = overlayBounds
+                    val ar = if (closing) collapseAnchorRect else openingAnchorRect
+                    val placement = if (closing) closingPlacement else openingPlacement
+                    val p = progress.value
+                    if (p < 1f && ob != null && ar != null && placement != null &&
+                        (closing || pagerState.currentPage == initialIndex)) {
+                        val frame = previewAnchorFrame(ar.translate(-ob.topLeft), placement.image, p, placement.rotation,
+                            ((if (closing) collapseAnchorClip else openingAnchorClip) ?: ar).translate(-ob.topLeft))
+                        val radius = 8.dp.toPx() * (1f - p) / frame.scale
+                        anchorClipPath.reset()
+                        anchorClipPath.addRoundRect(RoundRect(frame.clip, CornerRadius(radius)))
+                        if (frame.clipRotation != 0f) {
+                            anchorClipMatrix.reset()
+                            anchorClipMatrix.translate(placement.image.center.x, placement.image.center.y)
+                            anchorClipMatrix.rotateZ(frame.clipRotation)
+                            anchorClipMatrix.translate(-placement.image.center.x, -placement.image.center.y)
+                            anchorClipPath.transform(anchorClipMatrix)
+                        }
+                        clipPath(anchorClipPath) { this@drawWithContent.drawContent() }
+                    } else drawContent()
                 }
         ) { page ->
             when (val item = previewItems[page]) {
@@ -1203,6 +1354,7 @@ internal fun PhotoPreviewOverlay(
                         file = file,
                         cameraViewModel = cameraViewModel,
                         fhdBitmap = highResolutionBitmaps[file.handle],
+                        initialThumbnail = openingThumbnail.takeIf { file.handle == openingFile?.handle },
                         bottomInset = previewImageBottomInset,
                         imageTop = previewImageTop,
                         infoBottom = previewInfoBottom,
@@ -1210,6 +1362,7 @@ internal fun PhotoPreviewOverlay(
                         tapWhenZoomed = review != null,
                         cropProgress = cropLayoutProgress.value,
                         isLoadingFhd = highResolutionLoading.containsKey(file.handle),
+                        showLoadingSpinner = review == null,
                         allowRemoteThumbnailFallback = allowPreviewRemoteThumbnailFallback(
                             isCurrent = page == pagerState.currentPage,
                             fhdUnavailable = fhdUnavailable[file.handle] == true,
@@ -1220,7 +1373,13 @@ internal fun PhotoPreviewOverlay(
                         isCurrent = page == pagerState.currentPage,
                         interactive = previewGesturesEnabled,
                         viewportState = if(page==pagerState.currentPage) previewViewport else null,
-                        onPlacementChanged = { if(page==pagerState.currentPage) previewPlacement=it },
+                        onPlacementChanged = {
+                            if (page == pagerState.currentPage) {
+                                previewPlacement = it
+                                if (needsOpeningPlacement && file.handle == openingFile?.handle &&
+                                    openingPlacement == null) openingPlacement = it
+                            }
+                        },
                         onDisplayBitmapChanged = { bitmap ->
                             if (bitmap == null) displayedBitmaps.remove(file.handle)
                             else displayedBitmaps[file.handle] = bitmap
@@ -1481,15 +1640,11 @@ internal fun PhotoPreviewOverlay(
                     },
                     enabled = cameraState.isConnectedToCamera,
                     modifier = Modifier.align(Alignment.BottomStart).navigationBarsPadding()
-                        .padding(start = 12.dp, bottom = if (landscapeReview) 8.dp else 32.dp),
+                        .padding(start = 12.dp, bottom = if (landscapeReview) 60.dp else 84.dp),
                 ) {
                     Text(stringResource(if (!cameraState.isConnectedToCamera) R.string.remote_review_disconnected
                         else R.string.remote_review_retry), color = Color.White)
                 }
-            }
-            if (review.loadingMore && pagerState.currentPage == previewItems.lastIndex) {
-                CircularProgressIndicator(Modifier.align(Alignment.CenterEnd).padding(12.dp).size(20.dp),
-                    color = Color.White, strokeWidth = 2.dp)
             }
         }
 
@@ -1530,29 +1685,32 @@ internal fun PhotoPreviewOverlay(
                 ) {
                     ExifMetadataBar(
                         exif = displayExif,
+                        vertical = landscapeReview,
                         modifier = Modifier.weight(1f, fill = false)
                     )
                 }
             }
         }
 
+        // Membership only changes with the pager model/current page. Do not scan a large
+        // preview snapshot again for zoom, animation, EXIF or queue-state recompositions.
+        val photoActions = remember(previewItems, pagerState.currentPage) {
+            (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
+                PreviewPhotoActions(photo, previewBurstCollectionPage(previewItems, pagerState.currentPage) != null)
+            }
+        }
         PreviewPhotoTools(
-            photoActions = (currentItem as? PhotoPreviewItem.Photo)?.let { photo ->
-                PreviewPhotoActions(
-                    photo,
-                    (previewBurstCollectionPage(previewItems, pagerState.currentPage) ?: -1) in
-                        0 until pagerState.currentPage,
-                )
-            },
+            photoActions = photoActions,
             currentHandle = currentHandle,
-            inputsEnabled = previewGesturesEnabled && !closing && !pagerState.isScrollInProgress &&
-                abs(pagerState.currentPageOffsetFraction) < .01f,
+            burstTransitionInProgress = burstTransitionBusy,
+            inputsEnabled = previewGesturesEnabled && !closing && pagingSettled,
             editEnabled = !burstTransitionBusy && !queueAnimating && !queueGestureActive,
             collapseEnabled = !queueAnimating && !queueGestureActive && queueMotionJob?.isActive != true,
             rotationEnabled = !burstTransitionBusy,
             effectsAvailable = photoEffectsViewModel != null,
             effectsEnabled = photoEffectsEnabled,
             isReview = review != null,
+            reviewOptions = review,
             histogramMode = histogramMode,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -1694,6 +1852,7 @@ internal fun PhotoPreviewOverlay(
                         viewModel = effectsViewModel,
                         effectsOnly = true,
                         effectPreviewSource = source?.asAndroidBitmap(),
+                        effectPreviewSourceName = request.file.fileName,
                         effectPreviewInitialRotationQuarterTurns = request.rotationQuarterTurns,
                         effectPreviewExif = exifData[request.file.handle],
                         effectPreviewCameraManufacturer = cameraState.cameraManufacturer,
@@ -1781,6 +1940,7 @@ private fun PreviewPhotoBadges(showBurst: Boolean, isProtected: Boolean, modifie
 private fun PreviewPhotoTools(
     photoActions: PreviewPhotoActions?,
     currentHandle: Int?,
+    burstTransitionInProgress: Boolean,
     inputsEnabled: Boolean,
     editEnabled: Boolean,
     collapseEnabled: Boolean,
@@ -1788,6 +1948,7 @@ private fun PreviewPhotoTools(
     effectsAvailable: Boolean,
     effectsEnabled: Boolean,
     isReview: Boolean,
+    reviewOptions: PhotoReviewOptions?,
     histogramMode: HistogramMode,
     modifier: Modifier,
     onCollapseBurst: (String) -> Unit,
@@ -1796,18 +1957,19 @@ private fun PreviewPhotoTools(
     onHistogramModeChanged: (HistogramMode) -> Unit,
     onRotate: () -> Unit,
 ) {
-    // 工具行保留到淡出结束；翻到连拍合集也不能直接卸载按钮的显隐动画。
+    // 普通翻页保留工具到淡出结束；主动归组已由外层图层完成退场，
+    // 在不可见的交接帧直接移除，避免合集淡入时把旧工具再次带出来。
     var retainedPhotoActions by remember { mutableStateOf(photoActions) }
     var effectsButtonBounds by remember { mutableStateOf<Rect?>(null) }
     SideEffect { if (photoActions != null) retainedPhotoActions = photoActions }
     AnimatedVisibility(
         visible = photoActions != null,
         enter = fadeIn(tween(180)),
-        exit = fadeOut(tween(180)),
+        exit = if (burstTransitionInProgress) ExitTransition.None else fadeOut(tween(180)),
         label = "previewPhotoTools",
         modifier = modifier,
     ) {
-        (photoActions ?: retainedPhotoActions)?.let { actions ->
+        (photoActions ?: retainedPhotoActions.takeUnless { burstTransitionInProgress })?.let { actions ->
             val item = actions.photo
             val current = item.file
             // 淡出的旧页工具只供显示，不能触发上一张照片的编辑或传输。
@@ -1880,7 +2042,9 @@ private fun PreviewPhotoTools(
                         visible = current.extension !in VIDEO_EXTENSIONS,
                         label = "previewImageTools",
                     ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) {
+                        val imageTools: @Composable () -> Unit = {
+                            if (reviewOptions != null) RemoteReviewFollowButton(reviewOptions,
+                                buttonSize = actionSize)
                             PreviewHistogramButton(
                                 buttonSize = actionSize,
                                 mode = histogramMode,
@@ -1891,6 +2055,12 @@ private fun PreviewPhotoTools(
                             PreviewRotationButton(buttonSize = actionSize, onClick = {
                                 if (actionInputsEnabled && rotationEnabled) onRotate()
                             })
+                        }
+                        if (reviewOptions?.landscape == true) {
+                            Column(verticalArrangement = Arrangement.spacedBy(actionGap),
+                                horizontalAlignment = Alignment.CenterHorizontally) { imageTools() }
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(actionGap)) { imageTools() }
                         }
                     }
                 }
@@ -2303,6 +2473,7 @@ private fun BurstCollectionNavigationButton(
 @Composable
 private fun ExifMetadataBar(
     exif: PhotoExif,
+    vertical: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val parts = listOfNotNull(
@@ -2313,16 +2484,24 @@ private fun ExifMetadataBar(
         exif.focalLength,
     )
     if (parts.isEmpty()) return
-    val text = parts.joinToString("\u2009·\u2009")
-    PreviewInfoText(
-        text = text,
-        modifier = modifier,
-        overflow = TextOverflow.Ellipsis,
-        color = Color.White.copy(alpha = 0.88f),
-        textAlign = TextAlign.Start,
-        horizontalPadding = 0.dp,
-        verticalPadding = 0.dp,
-    )
+    val renderText: @Composable (String, Modifier) -> Unit = { text, textModifier ->
+        PreviewInfoText(
+            text = text,
+            modifier = textModifier,
+            overflow = TextOverflow.Ellipsis,
+            color = Color.White.copy(alpha = 0.88f),
+            textAlign = TextAlign.Start,
+            horizontalPadding = 0.dp,
+            verticalPadding = 0.dp,
+        )
+    }
+    if (vertical) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            parts.forEach { renderText(it, Modifier) }
+        }
+    } else {
+        renderText(parts.joinToString("\u2009·\u2009"), modifier)
+    }
 }
 
 /** File name and exposure share typography, alignment and responsive text sizing. */
@@ -2459,6 +2638,7 @@ private fun PreviewPage(
     file: NikonCamera.FileInfo,
     cameraViewModel: CameraViewModel,
     fhdBitmap: ImageBitmap?,
+    initialThumbnail: ImageBitmap? = null,
     bottomInset: androidx.compose.ui.unit.Dp = 0.dp,
     imageTop: androidx.compose.ui.unit.Dp? = null,
     infoBottom: Dp = 0.dp,
@@ -2466,6 +2646,7 @@ private fun PreviewPage(
     tapWhenZoomed: Boolean = false,
     cropProgress: Float = 0f,
     isLoadingFhd: Boolean,
+    showLoadingSpinner: Boolean = true,
     allowRemoteThumbnailFallback: Boolean,
     loadEnabled: Boolean,
     rotationDegrees: Float,
@@ -2480,7 +2661,7 @@ private fun PreviewPage(
     // 预览通常由一个已经显示缩略图的可见格子打开。同步复用同一份内存缓存，确保
     // overlay 第一帧就有画面；缓存未命中时才异步走磁盘/相机兜底。
     var thumbnail by remember(file.handle) {
-        mutableStateOf(cameraViewModel.cachedThumbnail(file.handle))
+        mutableStateOf(initialThumbnail ?: cameraViewModel.cachedThumbnail(file.handle))
     }
     // 取过仍为 null → 该文件确实没有缩略图（如部分视频）。
     var noThumb by remember(file.handle) { mutableStateOf(false) }
@@ -2616,9 +2797,9 @@ private fun PreviewPage(
 
                 }
             }
-            anyLoading -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
+            anyLoading -> if (showLoadingSpinner) CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
             noThumb -> Text(stringResource(R.string.no_preview), color = DarkOnSurfaceVariant)
-            else -> CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
+            else -> if (showLoadingSpinner) CircularProgressIndicator(color = AccentBlue, modifier = Modifier.size(32.dp))
         }
     }
 }
@@ -2652,9 +2833,7 @@ private fun ZoomablePreviewViewport(
         animationSpec = tween(220),
         label = "previewRotation",
     )
-    val comparisonFeedback = if (comparisonEnabled) {
-        com.ztransfer.ui.util.rememberLongPressFeedback()
-    } else null
+    val comparisonHaptics = if (comparisonEnabled) rememberHaptics(LocalHapticsEnabled.current) else null
     val latestOnComparisonChange by rememberUpdatedState(onComparisonChange)
     val localState=remember(stateKey) { PreviewViewportState() }
     val viewportState=externalState ?: localState
@@ -2686,219 +2865,226 @@ private fun ZoomablePreviewViewport(
         offset = Offset.Zero
     }
 
-    val rawAspect = imageSize?.takeIf { it.width > 0 && it.height > 0 }?.let {
-        it.width.toFloat() / it.height.toFloat()
-    }
-    val quarterTurn = ((rotationDegrees / 90f).roundToInt() % 2) != 0
-    val imageAspect = rawAspect?.let { if (quarterTurn) 1f / it else it }
-    var viewportSize by remember { mutableStateOf(IntSize.Zero) }
-    val viewportW = viewportSize.width.toFloat()
-    val viewportH = viewportSize.height.toFloat()
-    val baseImageW: Float
-    val baseImageH: Float
-    if (rawAspect != null && viewportW > 0f && viewportH > 0f) {
-        val viewportAspect = viewportW / viewportH
-        baseImageW = if (rawAspect > viewportAspect) viewportW else viewportH * rawAspect
-        baseImageH = if (rawAspect > viewportAspect) viewportW / rawAspect else viewportH
-    } else {
-        baseImageW = 0f
-        baseImageH = 0f
-    }
-    val targetRotationRadians = Math.toRadians(rotationDegrees.toDouble())
-    val targetAbsCos = abs(cos(targetRotationRadians)).toFloat()
-    val targetAbsSin = abs(sin(targetRotationRadians)).toFloat()
-    val targetBoundsWidth = baseImageW * targetAbsCos + baseImageH * targetAbsSin
-    val targetBoundsHeight = baseImageW * targetAbsSin + baseImageH * targetAbsCos
-    val fittedViewportWidth = with(LocalDensity.current) {
-        (viewportW - if (imageTop != null) {
-            if ((imageAspect ?: 1f) < 1f) 40.dp.toPx() else 24.dp.toPx()
-        } else 0f).coerceAtLeast(1f)
-    }
-    val targetRotationFit = if (
-        targetBoundsWidth > 0f && targetBoundsHeight > 0f && viewportW > 0f && viewportH > 0f
+    // Resolve fitting and insets from this layout's real constraints on the first frame.
+    // onSizeChanged would draw once with zero-size geometry, then visibly correct the photo.
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
     ) {
-        min(fittedViewportWidth / targetBoundsWidth, viewportH / targetBoundsHeight)
-    } else {
-        1f
-    }
-    val targetBreathingRoom = 1f
-    val density = LocalDensity.current
-    val cropTopPx = with(density) {
-        imageTop?.let { (it + if ((imageAspect ?: 0f) > 1f) 60.dp else 0.dp).toPx() }
-    }
-    val normalTopPx = with(density) { infoBottom.toPx() }
-    // Three crop rows are 128dp; the normal action row already reserves 44dp.
-    val cropExtraPx = with(density) { 84.dp.toPx() }
-    fun layoutFor(height: Float): PreviewPhotoLayout = if (cropTopPx == null)
-        PreviewPhotoLayout(1f, viewportH / 2f)
-    else {
-        val layout = previewPhotoLayout(viewportH, height, normalTopPx, cropTopPx, cropExtraPx, cropProgress,
-            cropTopAlignment = if ((imageAspect ?: 0f) > 1f) .5f else 1f)
-        // Lift normal portrait previews slightly, without crossing the information area.
-        val lift = if ((imageAspect ?: 1f) < 1f)
-            minOf(with(density) { 12.dp.toPx() } * (1f - cropProgress),
-                (layout.centerY - height * layout.scale / 2f - normalTopPx).coerceAtLeast(0f))
-        else 0f
-        layout.copy(centerY = layout.centerY - lift)
-    }
-    val photoLayout = layoutFor(targetBoundsHeight * targetRotationFit * targetBreathingRoom)
-    val topFit = photoLayout.scale
-    val baseShiftY = photoLayout.centerY - viewportH / 2f
-    val placementScale=scale
-    val placementOffset=offset
-    androidx.compose.runtime.SideEffect {
-        if(viewportW>0f && viewportH>0f && targetBoundsWidth>0f && targetBoundsHeight>0f) {
-            val width=targetBoundsWidth*targetRotationFit*targetBreathingRoom*topFit*placementScale
-            val height=targetBoundsHeight*targetRotationFit*targetBreathingRoom*topFit*placementScale
-            val baseCenter=Offset(viewportW/2f,viewportH/2f+baseShiftY)
-            val center=baseCenter+placementOffset
-            onPlacementChanged(PreviewImagePlacement(Rect(center.x-width/2f,center.y-height/2f,
-                center.x+width/2f,center.y+height/2f),androidx.compose.ui.geometry.Size(viewportW,viewportH),rotationDegrees,baseCenter,cropProgress))
+        val rawAspect = imageSize?.takeIf { it.width > 0 && it.height > 0 }?.let {
+            it.width.toFloat() / it.height.toFloat()
         }
-    }
-    val oneToOneZoom = imageSize?.takeIf {
-        it.width > 0 && it.height > 0 && baseImageW > 0f && baseImageH > 0f
-    }?.let {
-        max(it.width / baseImageW, it.height / baseImageH) /
-            (targetRotationFit * targetBreathingRoom * topFit).coerceAtLeast(0.01f)
-    } ?: 1f
-    val maximumZoom = max(MAX_ZOOM, oneToOneZoom)
+        val quarterTurn = ((rotationDegrees / 90f).roundToInt() % 2) != 0
+        val imageAspect = rawAspect?.let { if (quarterTurn) 1f / it else it }
+        val viewportSize = IntSize(constraints.maxWidth, constraints.maxHeight)
+        val viewportW = viewportSize.width.toFloat()
+        val viewportH = viewportSize.height.toFloat()
+        val baseImageW: Float
+        val baseImageH: Float
+        if (rawAspect != null && viewportW > 0f && viewportH > 0f) {
+            val viewportAspect = viewportW / viewportH
+            baseImageW = if (rawAspect > viewportAspect) viewportW else viewportH * rawAspect
+            baseImageH = if (rawAspect > viewportAspect) viewportW / rawAspect else viewportH
+        } else {
+            baseImageW = 0f
+            baseImageH = 0f
+        }
+        val targetRotationRadians = Math.toRadians(rotationDegrees.toDouble())
+        val targetAbsCos = abs(cos(targetRotationRadians)).toFloat()
+        val targetAbsSin = abs(sin(targetRotationRadians)).toFloat()
+        val targetBoundsWidth = baseImageW * targetAbsCos + baseImageH * targetAbsSin
+        val targetBoundsHeight = baseImageW * targetAbsSin + baseImageH * targetAbsCos
+        val fittedViewportWidth = with(LocalDensity.current) {
+            (viewportW - if (imageTop != null) {
+                if ((imageAspect ?: 1f) < 1f) 40.dp.toPx() else 24.dp.toPx()
+            } else 0f).coerceAtLeast(1f)
+        }
+        val targetRotationFit = if (
+            targetBoundsWidth > 0f && targetBoundsHeight > 0f && viewportW > 0f && viewportH > 0f
+        ) {
+            min(fittedViewportWidth / targetBoundsWidth, viewportH / targetBoundsHeight)
+        } else {
+            1f
+        }
+        val targetBreathingRoom = 1f
+        val density = LocalDensity.current
+        val cropTopPx = with(density) {
+            imageTop?.let { (it + if ((imageAspect ?: 0f) > 1f) 60.dp else 0.dp).toPx() }
+        }
+        val normalTopPx = with(density) { infoBottom.toPx() }
+        // Three crop rows are 128dp; the normal action row already reserves 44dp.
+        val cropExtraPx = with(density) { 84.dp.toPx() }
+        fun layoutFor(height: Float): PreviewPhotoLayout = if (cropTopPx == null)
+            PreviewPhotoLayout(1f, viewportH / 2f)
+        else {
+            val layout = previewPhotoLayout(viewportH, height, normalTopPx, cropTopPx, cropExtraPx, cropProgress,
+                cropTopAlignment = if ((imageAspect ?: 0f) > 1f) .5f else 1f)
+            // Lift normal portrait previews slightly, without crossing the information area.
+            val lift = if ((imageAspect ?: 1f) < 1f)
+                minOf(with(density) { 12.dp.toPx() } * (1f - cropProgress),
+                    (layout.centerY - height * layout.scale / 2f - normalTopPx).coerceAtLeast(0f))
+            else 0f
+            layout.copy(centerY = layout.centerY - lift)
+        }
+        val photoLayout = layoutFor(targetBoundsHeight * targetRotationFit * targetBreathingRoom)
+        val topFit = photoLayout.scale
+        val baseShiftY = photoLayout.centerY - viewportH / 2f
+        val placementScale=scale
+        val placementOffset=offset
+        androidx.compose.runtime.SideEffect {
+            if(viewportW>0f && viewportH>0f && targetBoundsWidth>0f && targetBoundsHeight>0f) {
+                val width=targetBoundsWidth*targetRotationFit*targetBreathingRoom*topFit*placementScale
+                val height=targetBoundsHeight*targetRotationFit*targetBreathingRoom*topFit*placementScale
+                val baseCenter=Offset(viewportW/2f,viewportH/2f+baseShiftY)
+                val center=baseCenter+placementOffset
+                onPlacementChanged(PreviewImagePlacement(Rect(center.x-width/2f,center.y-height/2f,
+                    center.x+width/2f,center.y+height/2f),androidx.compose.ui.geometry.Size(viewportW,viewportH),rotationDegrees,baseCenter,cropProgress))
+            }
+        }
+        val oneToOneZoom = imageSize?.takeIf {
+            it.width > 0 && it.height > 0 && baseImageW > 0f && baseImageH > 0f
+        }?.let {
+            max(it.width / baseImageW, it.height / baseImageH) /
+                (targetRotationFit * targetBreathingRoom * topFit).coerceAtLeast(0.01f)
+        } ?: 1f
+        val maximumZoom = max(MAX_ZOOM, oneToOneZoom)
 
-    fun clampOffset(
-        targetScale: Float,
-        targetOffset: Offset,
-        displayWidth: Float,
-        displayHeight: Float,
-        containerWidth: Float,
-        containerHeight: Float,
-    ): Offset {
-        return clampPreviewPan(targetScale, targetOffset,
-            androidx.compose.ui.geometry.Size(displayWidth, displayHeight),
-            androidx.compose.ui.geometry.Size(containerWidth, containerHeight),
-            Offset(containerWidth / 2f, containerHeight / 2f + baseShiftY))
-    }
+        fun clampOffset(
+            targetScale: Float,
+            targetOffset: Offset,
+            displayWidth: Float,
+            displayHeight: Float,
+            containerWidth: Float,
+            containerHeight: Float,
+        ): Offset {
+            return clampPreviewPan(targetScale, targetOffset,
+                androidx.compose.ui.geometry.Size(displayWidth, displayHeight),
+                androidx.compose.ui.geometry.Size(containerWidth, containerHeight),
+                Offset(containerWidth / 2f, containerHeight / 2f + baseShiftY))
+        }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .onSizeChanged { viewportSize = it }
-            // 单指且处于 1x 时不消费，让列表分页器接管；单图预览的根层会统一阻断穿透。
-            .pointerInput(viewportState, imageAspect, zoomEnabled, maximumZoom, baseShiftY, viewportSize) {
-                val aspect = imageAspect
-                if (!zoomEnabled || aspect == null) return@pointerInput
-                val containerWidth = size.width.toFloat()
-                val containerHeight = size.height.toFloat()
-                val displayWidth = targetBoundsWidth * targetRotationFit * targetBreathingRoom * topFit
-                val displayHeight = targetBoundsHeight * targetRotationFit * targetBreathingRoom * topFit
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    zoomAnimJob?.cancel()
-                    do {
-                        val event = awaitPointerEvent()
-                        val pressed = event.changes.count { it.pressed }
-                        if (pressed >= 2 || scale > 1.01f) {
-                            val zoomChange = event.calculateZoom()
-                            val panChange = event.calculatePan()
-                            if (zoomChange != 1f || panChange != Offset.Zero) {
-                                val newScale = (scale * zoomChange).coerceIn(1f, maximumZoom)
-                                val centroid = event.calculateCentroid(useCurrent = true)
-                                val centerDelta = Offset(
-                                    centroid.x - containerWidth / 2f,
-                                    centroid.y - containerHeight / 2f - baseShiftY,
-                                )
-                                offset = clampOffset(
-                                    newScale,
-                                    previewPinchOffset(offset, centerDelta, newScale / scale, panChange),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // 单指且处于 1x 时不消费，让列表分页器接管；单图预览的根层会统一阻断穿透。
+                .pointerInput(viewportState, imageAspect, zoomEnabled, maximumZoom, baseShiftY, viewportSize) {
+                    val aspect = imageAspect
+                    if (!zoomEnabled || aspect == null) return@pointerInput
+                    val containerWidth = size.width.toFloat()
+                    val containerHeight = size.height.toFloat()
+                    val displayWidth = targetBoundsWidth * targetRotationFit * targetBreathingRoom * topFit
+                    val displayHeight = targetBoundsHeight * targetRotationFit * targetBreathingRoom * topFit
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        zoomAnimJob?.cancel()
+                        do {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.count { it.pressed }
+                            if (pressed >= 2 || scale > 1.01f) {
+                                val zoomChange = event.calculateZoom()
+                                val panChange = event.calculatePan()
+                                if (zoomChange != 1f || panChange != Offset.Zero) {
+                                    val newScale = (scale * zoomChange).coerceIn(1f, maximumZoom)
+                                    val centroid = event.calculateCentroid(useCurrent = true)
+                                    val centerDelta = Offset(
+                                        centroid.x - containerWidth / 2f,
+                                        centroid.y - containerHeight / 2f - baseShiftY,
+                                    )
+                                    offset = clampOffset(
+                                        newScale,
+                                        previewPinchOffset(offset, centerDelta, newScale / scale, panChange),
+                                        displayWidth,
+                                        displayHeight,
+                                        containerWidth,
+                                        containerHeight,
+                                    )
+                                    scale = newScale
+                                    event.changes.forEach { change ->
+                                        if (change.pressed) change.consume()
+                                    }
+                                }
+                            }
+                        } while (event.changes.any { it.pressed })
+                    }
+                }
+                .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled, comparisonHaptics) {
+                    val containerWidth = size.width.toFloat()
+                    val containerHeight = size.height.toFloat()
+                    detectTapGestures(
+                        onPress = {
+                            try {
+                                // No press-start feedback: a pending pinch or pan must stay silent.
+                                tryAwaitRelease()
+                            } finally {
+                                latestOnComparisonChange(false)
+                            }
+                        },
+                        onLongPress = if (comparisonEnabled) ({
+                            latestOnComparisonChange(true)
+                            comparisonHaptics?.longPress()
+                        }) else null,
+                        onTap = { if (scale <= 1.01f || tapWhenZoomed) onTap() },
+                        onDoubleTap = { tap ->
+                            val aspect = imageAspect
+                            if (!zoomEnabled || aspect == null) return@detectTapGestures
+                            val displayWidth = targetBoundsWidth * targetRotationFit * targetBreathingRoom * topFit
+                            val displayHeight = targetBoundsHeight * targetRotationFit * targetBreathingRoom * topFit
+                            val targetScale = if (scale > 1.01f) 1f else DOUBLE_TAP_ZOOM
+                            val startScale = scale
+                            val startOffset = offset
+                            val targetOffset = if (targetScale == 1f) {
+                                Offset.Zero
+                            } else {
+                                clampOffset(
+                                    targetScale,
+                                    Offset(
+                                        tap.x - containerWidth / 2f,
+                                        tap.y - containerHeight / 2f - baseShiftY,
+                                    ) * (1f - targetScale),
                                     displayWidth,
                                     displayHeight,
                                     containerWidth,
                                     containerHeight,
                                 )
-                                scale = newScale
-                                event.changes.forEach { change ->
-                                    if (change.pressed) change.consume()
+                            }
+                            zoomAnimJob?.cancel()
+                            zoomAnimJob = scope.launch {
+                                Animatable(0f).animateTo(1f, tween(240)) {
+                                    scale = startScale + (targetScale - startScale) * value
+                                    offset = androidx.compose.ui.geometry.lerp(
+                                        startOffset,
+                                        targetOffset,
+                                        value,
+                                    )
                                 }
                             }
-                        }
-                    } while (event.changes.any { it.pressed })
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            val imageTransform = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val angle = Math.toRadians(animatedRotation.toDouble())
+                    val absCos = abs(cos(angle)).toFloat()
+                    val absSin = abs(sin(angle)).toFloat()
+                    val boundsWidth = baseImageW * absCos + baseImageH * absSin
+                    val boundsHeight = baseImageW * absSin + baseImageH * absCos
+                    val rotationFit = if (boundsWidth > 0f && boundsHeight > 0f) {
+                        min(fittedViewportWidth / boundsWidth, viewportH / boundsHeight)
+                    } else {
+                        1f
+                    }
+                    val portraitBreathingRoom = 1f
+                    val animatedLayout = layoutFor(boundsHeight * rotationFit * portraitBreathingRoom)
+                    scaleX = scale * rotationFit * portraitBreathingRoom * animatedLayout.scale
+                    scaleY = scaleX
+                    translationX = offset.x
+                    translationY = offset.y + animatedLayout.centerY - viewportH / 2f
+                    rotationZ = animatedRotation
                 }
-            }
-            .pointerInput(viewportState, imageAspect, zoomEnabled, baseShiftY, viewportSize, maximumZoom, comparisonEnabled, comparisonFeedback) {
-                val containerWidth = size.width.toFloat()
-                val containerHeight = size.height.toFloat()
-                detectTapGestures(
-                    onPress = {
-                        try {
-                            if (comparisonFeedback != null) comparisonFeedback.trackPress(this)
-                            else tryAwaitRelease()
-                        } finally {
-                            latestOnComparisonChange(false)
-                        }
-                    },
-                    onLongPress = if (comparisonEnabled) ({
-                        comparisonFeedback?.trigger { latestOnComparisonChange(true) }
-                    }) else null,
-                    onTap = { if (scale <= 1.01f || tapWhenZoomed) onTap() },
-                    onDoubleTap = { tap ->
-                        val aspect = imageAspect
-                        if (!zoomEnabled || aspect == null) return@detectTapGestures
-                        val displayWidth = targetBoundsWidth * targetRotationFit * targetBreathingRoom * topFit
-                        val displayHeight = targetBoundsHeight * targetRotationFit * targetBreathingRoom * topFit
-                        val targetScale = if (scale > 1.01f) 1f else DOUBLE_TAP_ZOOM
-                        val startScale = scale
-                        val startOffset = offset
-                        val targetOffset = if (targetScale == 1f) {
-                            Offset.Zero
-                        } else {
-                            clampOffset(
-                                targetScale,
-                                Offset(
-                                    tap.x - containerWidth / 2f,
-                                    tap.y - containerHeight / 2f - baseShiftY,
-                                ) * (1f - targetScale),
-                                displayWidth,
-                                displayHeight,
-                                containerWidth,
-                                containerHeight,
-                            )
-                        }
-                        zoomAnimJob?.cancel()
-                        zoomAnimJob = scope.launch {
-                            Animatable(0f).animateTo(1f, tween(240)) {
-                                scale = startScale + (targetScale - startScale) * value
-                                offset = androidx.compose.ui.geometry.lerp(
-                                    startOffset,
-                                    targetOffset,
-                                    value,
-                                )
-                            }
-                        }
-                    },
-                )
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        val imageTransform = Modifier
-            .fillMaxSize()
-            .graphicsLayer {
-                val angle = Math.toRadians(animatedRotation.toDouble())
-                val absCos = abs(cos(angle)).toFloat()
-                val absSin = abs(sin(angle)).toFloat()
-                val boundsWidth = baseImageW * absCos + baseImageH * absSin
-                val boundsHeight = baseImageW * absSin + baseImageH * absCos
-                val rotationFit = if (boundsWidth > 0f && boundsHeight > 0f) {
-                    min(fittedViewportWidth / boundsWidth, viewportH / boundsHeight)
-                } else {
-                    1f
-                }
-                val portraitBreathingRoom = 1f
-                val animatedLayout = layoutFor(boundsHeight * rotationFit * portraitBreathingRoom)
-                scaleX = scale * rotationFit * portraitBreathingRoom * animatedLayout.scale
-                scaleY = scaleX
-                translationX = offset.x
-                translationY = offset.y + animatedLayout.centerY - viewportH / 2f
-                rotationZ = animatedRotation
-            }
-        content(imageTransform)
+            content(imageTransform)
+        }
     }
 }

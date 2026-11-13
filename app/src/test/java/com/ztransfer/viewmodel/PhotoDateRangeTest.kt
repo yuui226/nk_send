@@ -74,17 +74,6 @@ class PhotoDateRangeTest {
     }
 
     @Test
-    fun `latest capture date ignores malformed values`() {
-        assertEquals(
-            LocalDate.of(2026, 8, 6),
-            latestCaptureLocalDate(
-                sequenceOf(null, "bad", "20260229T120000", "20260805T120000", "20260806T010000")
-            ),
-        )
-        assertNull(latestCaptureLocalDate(sequenceOf(null, "bad")))
-    }
-
-    @Test
     fun `compact label stays short across years`() {
         assertEquals(
             "26/12/31–27/01/02",

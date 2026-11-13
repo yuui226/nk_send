@@ -82,4 +82,36 @@ class BurstGridItemsTest {
             (it as ThumbnailGridItem.Photo).file.handle
         })
     }
+
+    @Test
+    fun deletingTheFirstBurstFrameKeepsItsSuccessorExpandedInTheFirstGridModel() {
+        val previousFiles = (4 downTo 1).map(::file)
+        val currentFiles = previousFiles.filterNot { it.handle == 1 }
+        val previousGroups = computeBurstGroups(previousFiles)
+        val currentGroups = computeBurstGroups(currentFiles)
+        val previousId = previousGroups.single().id
+        val currentId = currentGroups.single().id
+        assertTrue(previousId != currentId)
+
+        // Build directly from the synchronously reconciled IDs, without first publishing a
+        // collapsed model while the owner's mutable expansion map still contains the old ID.
+        val effectiveExpandedIds = reconciledExpandedBurstIds(
+            previousGroups = previousGroups,
+            currentGroups = currentGroups,
+            expandedIds = setOf(previousId),
+        )
+        val items = buildThumbnailGridItems(
+            files = currentFiles,
+            burstIdByHandle = currentFiles.associate { it.handle to currentId },
+            collapseBurstPhotos = true,
+            expandedBurstIds = effectiveExpandedIds,
+        )
+
+        assertEquals(setOf(currentId), effectiveExpandedIds)
+        assertEquals(currentId, (items.first() as ThumbnailGridItem.BurstCollection).id)
+        assertEquals(currentFiles.map { it.handle }, items.drop(1).map {
+            (it as ThumbnailGridItem.Photo).file.handle
+        })
+        assertEquals(currentFiles.size + 1, items.size)
+    }
 }

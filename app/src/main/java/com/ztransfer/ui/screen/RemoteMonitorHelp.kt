@@ -34,6 +34,7 @@ internal fun RemoteMonitorHelpBubble(
             monitorHelpItem(R.string.monitor_help_status_label, R.string.monitor_help_status),
         )),
         TipBubbleSection(stringResource(R.string.monitor_help_section_camera), listOf(
+            monitorToolHelpItem(RemoteTool.SELF_TIMER, R.string.monitor_help_tool_self_timer, tools),
             monitorToolHelpItem(RemoteTool.WHITE_BALANCE, R.string.monitor_help_tool_white_balance, tools),
             monitorToolHelpItem(RemoteTool.FOCUS_MODE, R.string.monitor_help_tool_focus_mode, tools),
             monitorToolHelpItem(RemoteTool.FOCUS_AREA, R.string.monitor_help_tool_focus_area, tools),
@@ -50,6 +51,7 @@ internal fun RemoteMonitorHelpBubble(
         )),
         TipBubbleSection(stringResource(R.string.monitor_help_section_display), listOf(
             monitorToolHelpItem(RemoteTool.HD, R.string.monitor_help_tool_hd, tools),
+            monitorToolHelpItem(RemoteTool.MIRROR, R.string.monitor_help_tool_mirror, tools),
             monitorToolHelpItem(RemoteTool.FPS, R.string.monitor_help_tool_fps, tools),
             monitorToolHelpItem(RemoteTool.AUDIO, R.string.monitor_help_tool_audio, tools),
             monitorToolHelpItem(RemoteTool.RECORD, R.string.monitor_help_tool_record, tools),

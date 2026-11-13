@@ -145,9 +145,9 @@ internal fun RemotePictureControlPanel(
         val state = overview ?: return@action
         val target = state.slots.singleOrNull { it.slot == action.slot } ?: return@action
         val permitted = when (action) {
-            is SlotAction.Activate -> state.canActivate && target.availability == PictureControlSlotAvailability.OCCUPIED
-            is SlotAction.Write -> state.canEdit && target.readable
-            is SlotAction.Clear -> state.canEdit && target.availability == PictureControlSlotAvailability.OCCUPIED
+            is SlotAction.Activate -> state.canActivate && target.selectable
+            is SlotAction.Write -> state.canEdit && target.editable
+            is SlotAction.Clear -> state.canEdit && target.editable && target.availability == PictureControlSlotAvailability.OCCUPIED
         }
         if (!permitted || !busyChange(true)) return@action
         onFeedback()
@@ -294,7 +294,7 @@ internal fun RemotePictureControlPanel(
                         modifier = Modifier.padding(horizontal = 6.dp))
                     if (displayedPage.confirmation == null && editor?.availability == PictureControlSlotAvailability.OCCUPIED) {
                         PictureControlClearButton(stringResource(R.string.picture_control_clear_slot),
-                            enabled && overview?.canEdit == true,
+                            enabled && overview?.canEdit == true && editor.editable,
                             modifier = Modifier.padding(start = 6.dp),
                             compact = true) {
                             onFeedback(); confirmation = PictureControlConfirmation.CLEAR
@@ -356,7 +356,8 @@ internal fun RemotePictureControlPanel(
                                 modifier = Modifier.fillMaxWidth().padding(12.dp))
                             PictureControlClearButton(stringResource(R.string.picture_control_confirm),
                                 enabled && overview?.canEdit == true &&
-                                editor?.availability == PictureControlSlotAvailability.OCCUPIED,
+                                editor?.editable == true &&
+                                editor.availability == PictureControlSlotAvailability.OCCUPIED,
                                 modifier = Modifier.fillMaxWidth()) {
                                 act(SlotAction.Clear(slotNumber))
                             }
@@ -369,7 +370,7 @@ internal fun RemotePictureControlPanel(
                     else -> {
                         PictureControlPresetChooser(folders,
                             presets = loadedPresets,
-                            enabled = enabled && overview?.canEdit == true && editor?.readable == true,
+                            enabled = enabled && overview?.canEdit == true && editor?.editable == true,
                             browsingEnabled = idle, pending = (pending as? SlotAction.Write)?.choice?.key,
                             onNotice = onNotice,
                             active = displayedPage == page && !closing,
@@ -442,10 +443,10 @@ private fun PictureControlSlotRow(
     canActivate: Boolean, canEdit: Boolean, onActivate: () -> Unit, onEdit: () -> Unit,
 ) {
     val colors = AppTheme.colors
-    val editable = canEdit && info.readable
+    val editable = canEdit && info.editable
     val empty = info.availability == PictureControlSlotAvailability.EMPTY
     val activatable = if (empty) editable
-        else canActivate && info.availability == PictureControlSlotAvailability.OCCUPIED
+        else canActivate && info.selectable
     Row(Modifier.fillMaxWidth()
         .background(if (selected) colors.accentBlue.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
         .clickable(enabled = activatable, role = Role.Button) {

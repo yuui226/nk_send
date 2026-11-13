@@ -7,6 +7,41 @@ import org.junit.Test
 
 class RemoteToolLayoutTest {
     @Test
+    fun mirrorPersistsAndHidingTurnsItOffWithoutChangingOtherEffects() {
+        val prefs = preferences()
+        var tools = RemoteToolPreferences(prefs)
+        assertFalse(tools.mirror.value)
+        assertTrue(tools.layout(false).visible(RemoteTool.MIRROR))
+        assertTrue(tools.layout(true).visible(RemoteTool.MIRROR))
+        tools.mirror.value = true
+        tools.level.value = true
+        tools = RemoteToolPreferences(prefs)
+        assertTrue(tools.mirror.value)
+        tools.layout(false).setVisible(RemoteTool.MIRROR, false)
+        assertFalse(tools.mirror.value)
+        assertTrue(tools.level.value)
+        tools = RemoteToolPreferences(prefs)
+        assertFalse(tools.mirror.value)
+        assertFalse(tools.layout(false).visible(RemoteTool.MIRROR))
+        assertTrue(tools.layout(true).visible(RemoteTool.MIRROR))
+        tools.layout(false).setVisible(RemoteTool.MIRROR, true)
+        assertFalse(tools.mirror.value)
+    }
+
+    @Test
+    fun mirrorUpgradeAppendsWithoutReorderingExistingTools() {
+        for (movie in listOf(false, true)) {
+            val mode = if (movie) "movie" else "photo"
+            val saved = RemoteTool.regular.filter { it != RemoteTool.MIRROR && it.availableIn(movie) }.reversed()
+            val prefs = preferences(mutableMapOf(
+                "remote_tool_order_$mode" to saved.joinToString(",") { it.id },
+                "remote_picture_control_placement_v1_$mode" to true,
+            ))
+            assertEquals(saved + RemoteTool.MIRROR, RemoteToolLayout(prefs, movie) {}.order)
+        }
+    }
+
+    @Test
     fun newInstallPlacesPresetSixthInBothModes() {
         val prefs = preferences()
         for (movie in listOf(false, true)) {
@@ -177,7 +212,7 @@ class RemoteToolLayoutTest {
         val editor = Proxy.newProxyInstance(SharedPreferences.Editor::class.java.classLoader,
             arrayOf(SharedPreferences.Editor::class.java)) { self, method, args ->
             when (method.name) {
-                "putString", "putStringSet", "putBoolean" -> {
+                "putString", "putStringSet", "putBoolean", "putInt", "putFloat" -> {
                     values[args[0] as String] = args[1]
                     self
                 }
@@ -188,7 +223,7 @@ class RemoteToolLayoutTest {
         return Proxy.newProxyInstance(SharedPreferences::class.java.classLoader,
             arrayOf(SharedPreferences::class.java)) { _, method, args ->
             when (method.name) {
-                "getString", "getStringSet", "getBoolean" -> values[args[0]] ?: args[1]
+                "getString", "getStringSet", "getBoolean", "getInt", "getFloat" -> values[args[0]] ?: args[1]
                 "edit" -> editor
                 else -> error("Unexpected preferences operation: ${method.name}")
             }

@@ -36,12 +36,16 @@ internal class ViewfinderViewport {
         offset = bounded(offset, scale, aspect)
     }
 
-    fun transform(centroid: Offset, pan: Offset, zoom: Float, aspect: Float) {
+    fun transform(centroid: Offset, pan: Offset, zoom: Float, aspect: Float, mirrored: Boolean = false) {
         if (!zoom.isFinite() || zoom <= 0f) return
         val nextScale = (scale * zoom).coerceIn(1f, 8f)
         val ratio = nextScale / scale
         val center = Offset(size.width / 2f, size.height / 2f)
-        offset = bounded(offset * ratio + (centroid - center) * (1f - ratio) + pan, nextScale, aspect)
+        // Keep the stored viewport in camera coordinates. Reflect the screen-space gesture
+        // before applying it so pan and pinch stay under the fingers in either display mode.
+        val imageCentroid = if (mirrored) Offset(size.width - centroid.x, centroid.y) else centroid
+        val imagePan = if (mirrored) Offset(-pan.x, pan.y) else pan
+        offset = bounded(offset * ratio + (imageCentroid - center) * (1f - ratio) + imagePan, nextScale, aspect)
         scale = nextScale
     }
 
@@ -68,6 +72,7 @@ internal fun ZoomableViewfinder(
     viewport: ViewfinderViewport,
     imageAspect: Float,
     modifier: Modifier = Modifier,
+    mirrored: Boolean = false,
     content: @Composable BoxScope.() -> Unit,
 ) {
     LaunchedEffect(imageAspect) { viewport.reset() }
@@ -76,23 +81,26 @@ internal fun ZoomableViewfinder(
     }
     Box(modifier.clipToBounds()
         .onSizeChanged { viewport.resize(Size(it.width.toFloat(), it.height.toFloat()), imageAspect) }
-        .pointerInput(viewport, imageAspect) {
+        .pointerInput(viewport, imageAspect, mirrored) {
             detectTransformGestures { centroid, pan, zoom, _ ->
-                viewport.transform(centroid, pan, zoom, imageAspect)
+                viewport.transform(centroid, pan, zoom, imageAspect, mirrored)
             }
         }) {
         // Pointer coordinates inside this layer are inverse-transformed by Compose as well,
         // so the existing AF mapping and its reticles share exactly the same coordinate space.
         Box(Modifier.matchParentSize().clip(imageWindow)) {
         Box(Modifier.matchParentSize().graphicsLayer {
-            scaleX = viewport.scale
+            val direction = if (mirrored) -1f else 1f
+            scaleX = viewport.scale * direction
             scaleY = viewport.scale
-            translationX = viewport.offset.x
+            translationX = viewport.offset.x * direction
             translationY = viewport.offset.y
         }, content = content)
         }
         if (viewport.scale > 1.01f) {
-            val crop = viewport.visibleRegion(imageAspect)
+            val originalCrop = viewport.visibleRegion(imageAspect)
+            val crop = if (mirrored) Rect(1f - originalCrop.right, originalCrop.top,
+                1f - originalCrop.left, originalCrop.bottom) else originalCrop
             Canvas(Modifier.align(Alignment.TopEnd).padding(top = 42.dp, end = 8.dp)
                 .width(64.dp).aspectRatio(imageAspect)) {
                 drawRect(MonitorOverlayBackground)

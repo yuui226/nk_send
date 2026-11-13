@@ -2,6 +2,8 @@ package com.ztransfer.crop
 
 import androidx.annotation.Keep
 import androidx.exifinterface.media.ExifInterface
+import com.ztransfer.util.readPhotoCaptureExif
+import com.ztransfer.util.PhotoCaptureLocation
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
@@ -18,16 +20,19 @@ internal object LosslessJpeg {
     private val gate = Mutex()
     private val loaded by lazy { System.loadLibrary("ztransfer_crop") }
 
-    suspend fun crop(input: File, output: File, selection: JpegCropSelection) =
-        cropResolved(input,output) { selection.resolve(it) }
+    suspend fun crop(input: File, output: File, selection: JpegCropSelection,
+        locationFallback: PhotoCaptureLocation? = null, trace: ((String) -> Unit)? = null) =
+        cropResolved(input, output, locationFallback, trace) { selection.resolve(it) }
 
-    suspend fun crop(input: File, output: File, recipe: JpegCropRecipe) =
-        cropResolved(input,output) { actual ->
+    suspend fun crop(input: File, output: File, recipe: JpegCropRecipe,
+        locationFallback: PhotoCaptureLocation? = null, trace: ((String) -> Unit)? = null) =
+        cropResolved(input, output, locationFallback, trace) { actual ->
             require(actual == recipe.source) { "Original JPEG geometry changed since crop confirmation" }
             recipe
         }
 
     private suspend fun cropResolved(input: File, output: File,
+        locationFallback: PhotoCaptureLocation?, trace: ((String) -> Unit)?,
         resolve: (JpegCropSource) -> JpegCropRecipe) = gate.withLock {
         require(input.canonicalPath != output.canonicalPath)
         currentCoroutineContext().ensureActive()
@@ -41,8 +46,11 @@ internal object LosslessJpeg {
                 actual.mcuWidth, actual.mcuHeight, r.left, r.top, r.width, r.height)
             currentCoroutineContext().ensureActive()
             val from = ExifInterface(input)
+            val sourceLocation = PhotoCaptureLocation.read(from)
             val to = ExifInterface(output)
-            for (tag in copiedTags) from.getAttribute(tag)?.let { to.setAttribute(tag, it) }
+            for ((tag, value) in readPhotoCaptureExif(from)) to.setAttribute(tag, value)
+            val recovered = locationFallback?.fillMissing(to) == true
+            trace?.invoke("inputGps=${sourceLocation != null} cameraGps=${locationFallback != null} recovered=$recovered")
             // Pixels are not rotated/re-encoded; EXIF describes their display orientation.
             to.setAttribute(ExifInterface.TAG_ORIENTATION, actual.orientation.toString())
             to.setAttribute(ExifInterface.TAG_IMAGE_WIDTH, r.width.toString())
@@ -50,6 +58,11 @@ internal object LosslessJpeg {
             to.setAttribute(ExifInterface.TAG_PIXEL_X_DIMENSION, r.width.toString())
             to.setAttribute(ExifInterface.TAG_PIXEL_Y_DIMENSION, r.height.toString())
             to.saveAttributes()
+            val savedLocation = PhotoCaptureLocation.read(ExifInterface(output))
+            trace?.invoke("outputGps=${savedLocation != null}")
+            check(sourceLocation == null && locationFallback == null || savedLocation != null) {
+                "Crop GPS metadata was not preserved"
+            }
             val result = readSource(output) ?: throw IOException("Invalid cropped JPEG")
             check(result.width == r.width && result.height == r.height && result.orientation == actual.orientation)
             currentCoroutineContext().ensureActive()
@@ -77,21 +90,4 @@ internal object LosslessJpeg {
 
     private external fun nativeCrop(input: String, output: String, width: Int, height: Int,
         mcuWidth: Int, mcuHeight: Int, x: Int, y: Int, cropWidth: Int, cropHeight: Int)
-
-    private val copiedTags = arrayOf(
-        ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL, ExifInterface.TAG_SOFTWARE,
-        ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED,
-        ExifInterface.TAG_SUBSEC_TIME_ORIGINAL, ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
-        ExifInterface.TAG_EXPOSURE_TIME, ExifInterface.TAG_F_NUMBER, ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
-        ExifInterface.TAG_FOCAL_LENGTH, ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
-        ExifInterface.TAG_LENS_MAKE, ExifInterface.TAG_LENS_MODEL, ExifInterface.TAG_EXPOSURE_PROGRAM,
-        ExifInterface.TAG_EXPOSURE_BIAS_VALUE, ExifInterface.TAG_METERING_MODE, ExifInterface.TAG_FLASH,
-        ExifInterface.TAG_WHITE_BALANCE, ExifInterface.TAG_COLOR_SPACE,
-        ExifInterface.TAG_GPS_VERSION_ID, ExifInterface.TAG_GPS_LATITUDE_REF, ExifInterface.TAG_GPS_LATITUDE,
-        ExifInterface.TAG_GPS_LONGITUDE_REF, ExifInterface.TAG_GPS_LONGITUDE,
-        ExifInterface.TAG_GPS_ALTITUDE_REF, ExifInterface.TAG_GPS_ALTITUDE,
-        ExifInterface.TAG_GPS_TIMESTAMP, ExifInterface.TAG_GPS_DATESTAMP,
-        ExifInterface.TAG_GPS_PROCESSING_METHOD, ExifInterface.TAG_GPS_SPEED_REF, ExifInterface.TAG_GPS_SPEED,
-        ExifInterface.TAG_GPS_TRACK_REF, ExifInterface.TAG_GPS_TRACK,
-    )
 }

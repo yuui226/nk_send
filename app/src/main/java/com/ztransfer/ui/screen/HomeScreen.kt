@@ -427,7 +427,7 @@ fun HomeScreen(
         state.staConnectionStatus == StaConnectionStatus.FAILED
     ) {
         ConnectionCardFeedback(
-            title = stringResource(R.string.sta_camera_not_found_short),
+            title = stringResource(R.string.connection_failed_short),
             body = state.staConnectionError ?: stringResource(R.string.sta_camera_not_found),
             accent = colors.statusError,
             multiline = true,
@@ -1547,7 +1547,11 @@ private fun ConnectionCardFeedbackContent(
 ) {
     val colors = AppTheme.colors
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            // The Wi-Fi card reserves a fixed content slot. Keep STA guidance readable at
+            // larger system font sizes without moving its footer or truncating the message.
+            .then(if (feedback.multiline) Modifier.verticalScroll(rememberScrollState()) else Modifier),
         horizontalAlignment = Alignment.Start,
     ) {
         if (topSpacing > 0.dp) {
@@ -1578,16 +1582,16 @@ private fun ConnectionCardFeedbackContent(
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
                     color = feedback.accent,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    maxLines = if (feedback.multiline) Int.MAX_VALUE else 2,
+                    overflow = if (feedback.multiline) TextOverflow.Clip else TextOverflow.Ellipsis,
                 )
                 feedback.body?.let { body ->
                     Text(
                         text = body,
                         style = MaterialTheme.typography.labelSmall,
                         color = colors.onSurfaceVariant,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
+                        maxLines = if (feedback.multiline) Int.MAX_VALUE else 3,
+                        overflow = if (feedback.multiline) TextOverflow.Clip else TextOverflow.Ellipsis,
                     )
                 }
             }
@@ -2059,6 +2063,9 @@ private fun TipsBubble(
         )
     } else {
         listOf(
+            TipBubbleItem(
+                text = stringResource(R.string.tip_sta_no_mobile_data),
+            ),
             TipBubbleItem(
                 label = stringResource(R.string.tip_sta_first_connection),
                 labelColor = colors.accentOrange,
