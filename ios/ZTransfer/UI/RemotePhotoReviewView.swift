@@ -110,6 +110,8 @@ struct RemotePhotoReviewView: View {
     var contentInsets = EdgeInsets()
     @State private var selected: CameraFile?
     @State private var previewProjection = PhotoPreviewProjectionCache()
+    @State private var hintVisible = false
+    @State private var hintTask: Task<Void, Never>?
     @StateObject private var dismissal: RemoteReviewDismissal
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
 
@@ -157,9 +159,38 @@ struct RemotePhotoReviewView: View {
             .accessibilityIdentifier("remote-review-close")
             .padding(.top, 8).padding(.trailing, landscape ? 4 : 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+            if hintVisible {
+                Text(AppLocalized.resource("remote_review_follow_on"))
+                    .zTransferTypography(.labelLarge)
+                    .foregroundStyle(ZTransferColors.primaryText)
+                    .lineLimit(1)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(ZTransferHintSurface())
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, landscape ? 64 : 88)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
             }
             .padding(contentInsets)
             .allowsHitTesting(!dismissal.closing)
+            .onChange(of: model.followLatest) { enabled in
+                hintTask?.cancel()
+                withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)) {
+                    hintVisible = enabled
+                }
+                guard enabled else { return }
+                hintTask = Task {
+                    try? await Task.sleep(for: .milliseconds(1800))
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)) {
+                        hintVisible = false
+                    }
+                }
+            }
+            .onDisappear { hintTask?.cancel() }
         }
         // Fade the black surface, image and controls as one layer. The input
         // barrier and paused frame gate remain until overlayCollapse finishes.

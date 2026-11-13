@@ -135,7 +135,9 @@ func reviewPhotos(_ files: [CameraFile]) -> [RemoteReviewPhoto] {
 /// Frozen per-card handle streams, lazy metadata, whole timestamp groups before publication.
 /// Actor reentrancy is explicitly serialized across suspended camera reads.
 actor RemoteReviewCatalog {
-    private let handles: [[UInt32]]
+    private let handlesByStorage: [[UInt32]]
+    /// Every frozen handle, including ones not yet read. Polling uses this set.
+    nonisolated let handles: Set<UInt32>
     private let readFile: @Sendable (UInt32) async throws -> CameraFile?
     private var cursors: [Int]
     private var heads: [CameraFile?]
@@ -150,7 +152,8 @@ actor RemoteReviewCatalog {
     private var waiters: [(UUID, CheckedContinuation<Void, Error>)] = []
 
     init(handlesByStorage: [[UInt32]], readFile: @escaping @Sendable (UInt32) async throws -> CameraFile?) {
-        handles = handlesByStorage
+        self.handlesByStorage = handlesByStorage
+        handles = Set(handlesByStorage.flatMap { $0 })
         cursors = Array(repeating: 0, count: handlesByStorage.count)
         heads = Array(repeating: nil, count: handlesByStorage.count)
         self.readFile = readFile
@@ -160,10 +163,10 @@ actor RemoteReviewCatalog {
             (pendingByStem[reviewStem(file)]?.contains { reviewCompanions($0, file) } ?? false)
     }
     private func peek() async throws -> (Int, CameraFile)? {
-        for slot in handles.indices {
-            while heads[slot] == nil && cursors[slot] < handles[slot].count {
+        for slot in handlesByStorage.indices {
+            while heads[slot] == nil && cursors[slot] < handlesByStorage[slot].count {
                 try Task.checkCancellation()
-                let file = try await readFile(handles[slot][cursors[slot]])
+                let file = try await readFile(handlesByStorage[slot][cursors[slot]])
                 // Failed/cancelled reads leave the cursor retryable.
                 cursors[slot] += 1
                 heads[slot] = file

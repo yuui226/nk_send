@@ -54,6 +54,7 @@ struct RemoteZoomableViewfinder<Content: View>: View {
     let aspect: CGFloat
     let imageSize: CGSize
     let metadata: RemoteLiveViewMetadata?
+    var mirrored = false
     let onFocus: (RemoteFocusPoint) -> Void
     @ViewBuilder let content: () -> Content
     @State private var viewport = RemoteViewfinderViewport()
@@ -64,23 +65,28 @@ struct RemoteZoomableViewfinder<Content: View>: View {
             let imageRect = CGRect(x: CGFloat(fitted.left), y: CGFloat(fitted.top),
                                    width: CGFloat(fitted.width), height: CGFloat(fitted.height))
             ZStack(alignment: .topTrailing) {
+                let direction: CGFloat = mirrored ? -1 : 1
                 content()
                     .environment(\.remoteViewfinderZoom, CGFloat(viewport.scale))
                     .frame(width: proxy.size.width, height: proxy.size.height)
-                    .scaleEffect(CGFloat(viewport.scale))
-                    .offset(x: CGFloat(viewport.offset.x), y: CGFloat(viewport.offset.y))
+                    .scaleEffect(x: CGFloat(viewport.scale) * direction, y: CGFloat(viewport.scale))
+                    .offset(x: CGFloat(viewport.offset.x) * direction, y: CGFloat(viewport.offset.y))
                     .mask { Path { $0.addRect(imageRect) } }
                     .allowsHitTesting(false)
                 RemoteViewfinderInput(identity: .init(aspect: aspect, imageSize: imageSize, metadata: metadata), onTransform: { change in
                     viewport.transform(centroid: change.centroid, pan: change.pan,
-                                       zoom: change.zoom, aspect: Float(aspect))
+                                       zoom: change.zoom, aspect: Float(aspect), mirrored: mirrored)
                 }, acceptsTap: { point in
-                    viewport.focusPoint(at: point, aspect: Float(aspect)) != nil
+                    viewport.focusPoint(at: point, aspect: Float(aspect), mirrored: mirrored) != nil
                 }, onTap: { point in
-                    if let focus = viewport.focusPoint(at: point, aspect: Float(aspect)) { onFocus(focus) }
+                    if let focus = viewport.focusPoint(at: point, aspect: Float(aspect), mirrored: mirrored) { onFocus(focus) }
                 }, onDoubleTap: { viewport.reset() })
                 if viewport.scale > 1.01 {
-                    navigator(crop: viewport.visibleRegion(aspect: Float(aspect)))
+                    let crop = viewport.visibleRegion(aspect: Float(aspect))
+                    let displayed = mirrored
+                        ? CGRect(x: 1 - crop.maxX, y: crop.minY, width: crop.width, height: crop.height)
+                        : crop
+                    navigator(crop: displayed)
                         .frame(width: 64, height: 64 / aspect)
                         .padding(.top, 42).padding(.trailing, 8)
                         .allowsHitTesting(false)

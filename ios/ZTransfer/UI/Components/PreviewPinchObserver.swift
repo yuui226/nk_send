@@ -7,9 +7,15 @@ import UIKit
 final class PreviewReviewTapGuard {
     private var start = CGPoint.zero
     private(set) var allowed = false
-    func begin(_ point: CGPoint) { start = point; allowed = true }
+    /// Follow-latest owns the touch until the finger lifts and the transition ends.
+    var blocked = false
+    func cancel() { allowed = false }
+    func begin(_ point: CGPoint) {
+        start = point
+        allowed = !blocked
+    }
     func observe(_ points: [CGPoint], touchSlop: CGFloat = 8) {
-        guard points.count == 1, let point = points.first,
+        guard !blocked, points.count == 1, let point = points.first,
               hypot(point.x - start.x, point.y - start.y) <= touchSlop else {
             allowed = false
             return

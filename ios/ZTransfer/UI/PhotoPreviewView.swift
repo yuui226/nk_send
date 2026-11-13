@@ -396,6 +396,12 @@ struct PhotoPreviewView: View {
     @State private var exifLoadedAlpha: CGFloat = 0
     @State private var reviewRetry = 0
     @State private var reviewTap = PreviewReviewTapGuard()
+    @State private var appliedFollowRevision = 0
+    @State private var followingLatest = false
+    @State private var followIncoming = false
+    @State private var followVisibility: CGFloat = 1
+    @State private var pendingFollowID: UInt32?
+    @State private var followEpoch = 0
     @State private var previewEntries: [PhotoPreviewEntry]
     @State private var rotationDegrees: Double = 0
     @State private var cropPresented = false
@@ -568,12 +574,13 @@ struct PhotoPreviewView: View {
                                              initialThumbnail: file.id == openingSource.file?.id ? openingSource.thumbnail : nil,
                                              rotationDegrees: rotationDegrees,
                                              infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
-                                             interactive: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
-                                             pinchEnabled: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy,
+                                             interactive: !followingLatest && !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
+                                             pinchEnabled: !followingLatest && !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy,
                                              cropActive: cropPresented && itemIndex == index,
                                              cropTop: cropTop, cropEditor: cropEditor,
                                              zoomEnabled: !file.fileExtension.lowercased().hasSuffix(".mov") &&
                                                 !file.fileExtension.lowercased().hasSuffix(".mp4"),
+                                             showsLoadingSpinner: review == nil,
                                              loadEnabled: deferredLoadsEnabled,
                                              allowRemoteThumbnailFallback: isSessionConnected &&
                                                 allowPreviewRemoteThumbnailFallback(
@@ -673,14 +680,16 @@ struct PhotoPreviewView: View {
                     closing: closing, openingReady: !needsOpeningPlacement || openingPlacement != nil
                 ))
                 .scaleEffect(burstPagerScale)
-                .opacity(burstPagerAlpha)
-                .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
+                .opacity(burstPagerAlpha * followVisibility)
+                .offset(x: UIScreen.main.bounds.width * burstPagerSlide
+                    + 36 * (1 - followVisibility) * (followIncoming ? -1 : 1))
+                .allowsHitTesting(!followingLatest)
                 .modifier(PhotoPreviewQueueMotionTransform(motion: queueMotion))
                 // Once an upward queue drag wins direction arbitration, cancel
                 // the page scroll recognizer for the rest of this touch. A normal
                 // horizontal drag keeps the pager enabled.
                 .scrollDisabled(
-                    effectsFile != nil || cropPresented || cropRestoring || currentZoomed || magnificationActive || queueDragDirection == .upward ||
+                    followingLatest || effectsFile != nil || cropPresented || cropRestoring || currentZoomed || magnificationActive || queueDragDirection == .upward ||
                         queueFlightActive || burstTransitionBusy
                 )
                 .allowsHitTesting(
@@ -754,10 +763,11 @@ struct PhotoPreviewView: View {
                     .frame(height: 36)
                     .padding(.trailing, review == nil ? 172 : 52)
                     Group {
-                        if let exif { PreviewExifBar(exif: exif) }
+                        if let exif { PreviewExifBar(exif: exif, vertical: landscapeReview) }
                         else { Color.clear }
                     }
-                    .frame(height: 26, alignment: .topLeading)
+                    .frame(height: landscapeReview ? nil : 26, alignment: .topLeading)
+                    .fixedSize(horizontal: false, vertical: landscapeReview)
                     .modifier(PhotoPreviewInformationFade(feedback: pageFeedback, base: burstPagerAlpha * exifLoadedAlpha))
                     .modifier(PhotoPreviewPresentationOpacity(clock: presentation))
                     .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
@@ -794,41 +804,7 @@ struct PhotoPreviewView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .allowsHitTesting(false)
             }
-            PhotoPreviewTools(
-                selection: currentPhoto.map { .init(file: $0,
-                    canCollapse: photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil) },
-                burstTransitionInProgress: burstTransitionBusy,
-                isReview: review != nil, effectsAvailable: effectsStore != nil && effectsDirectory != nil,
-                effectsEnabled: effectsStore?.isEnabled == true, histogramMode: histogramMode,
-                feedback: pageFeedback,
-                inputsEnabled: !closing && effectsFile == nil && !cropPresented && !cropRestoring && !magnificationActive,
-                editEnabled: !burstTransitionBusy && !queueFlightActive && queueDragDirection != .upward,
-                collapseEnabled: !queueFlightActive && queueDragDirection != .upward && queueFlightTask == nil,
-                rotationEnabled: !burstTransitionBusy,
-                onCollapse: { collapseCurrentBurst() },
-                onEffects: { file in
-                    ZTransferHaptics.shared.play(.navigation)
-                    effectsFile = file; effectsRotation = rotationQuarterTurns; effectsPresented = true
-                },
-                onCrop: { _ in
-                    ZTransferHaptics.shared.play(.navigation)
-                    cropPreparation.reset(); cropRetry = 0; cropLoadingVisible = false
-                    cropCloseTask?.cancel(); cropEditor.reset()
-                    cropEnteredAt = ProcessInfo.processInfo.systemUptime
-                    withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { cropPresented = true }
-                },
-                onHistogram: { histogramPreferences.mode = histogramMode.next },
-                onRotate: {
-                    // Accumulate angles so every press rotates counter-clockwise.
-                    withAnimation(photoPreviewRotationAnimation) { rotationDegrees -= 90 }
-                    rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
-                })
-                .compositingGroup()
-                .modifier(PhotoPreviewPresentationOpacity(clock: presentation, factor: burstPagerAlpha * (cropPresented ? 0 : 1)))
-                .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
-                .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
-                .padding(.trailing, landscapeReview ? 12 : review != nil ? 20 : 76)
-                .padding(.bottom, landscapeReview ? 8 : photoPreviewControlsBottomPadding)
+            previewToolControls
             PhotoPreviewHistogramLayer(model: histogram, mode: histogramMode,
                 currentPhoto: currentPhoto, cropPresented: cropPresented,
                 alpha: burstPagerAlpha, feedback: pageFeedback,
@@ -856,16 +832,11 @@ struct PhotoPreviewView: View {
                         }
                         if pageFailed { review.loadMore() }
                     }
-                    .padding(.leading, 12).padding(.bottom, landscapeReview ? 8 : photoPreviewControlsBottomPadding)
+                    .padding(.leading, 12).padding(.bottom, landscapeReview ? 60 : 84)
                 }
             }
         }
         .coordinateSpace(name: "photoPreviewStage")
-        .overlay(alignment: .trailing) {
-            if let review, review.loading, index == previewEntries.count - 1 {
-                RemoteCameraToolLoading(diameter: 20, strokeWidth: 2, color: .white).padding(12)
-            }
-        }
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -958,9 +929,12 @@ struct PhotoPreviewView: View {
         .onChange(of: currentEntryID) { _ in cancelQueueFlight() }
         .onChange(of: files) { updated in
             guard review != nil else { return }
-            previewEntries = updated.map { .photo($0) }
-            let bounded = min(index, max(0, updated.count - 1))
-            if index != bounded { index = bounded; pagerSelection = bounded }
+            if let review, review.followLatest, review.followRevision != appliedFollowRevision { return }
+            applyReviewFiles(updated, jumpToNewest: false)
+            if let review { appliedFollowRevision = review.followRevision }
+        }
+        .task(id: reviewFollowTaskID) {
+            await consumeReviewFollow()
         }
         .onChange(of: index) { value in
             closeCrop()
@@ -1013,6 +987,86 @@ struct PhotoPreviewView: View {
         }
     }
 
+    private var reviewFollowTaskID: String {
+        guard let review else { return "" }
+        return "\(review.followRevision)|\(review.followLatest)|\(files.map { String($0.id) }.joined(separator: ","))"
+    }
+
+    private func applyReviewFiles(_ updated: [CameraFile], jumpToNewest: Bool) {
+        let currentID = previewEntries.indices.contains(index) ? previewEntries[index].file?.id : selectedFile?.id
+        let nextIndex: Int
+        if jumpToNewest {
+            nextIndex = 0
+        } else if let currentID, let found = updated.firstIndex(where: { $0.id == currentID }) {
+            nextIndex = found
+        } else {
+            nextIndex = min(index, max(0, updated.count - 1))
+        }
+        // Android keeps the pager keyed by photo and uses scrollToPage, so neither
+        // a prepend nor the jump to the newest photo plays a paging animation.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            previewEntries = updated.map { .photo($0) }
+            if index != nextIndex { index = nextIndex }
+            if pagerSelection != nextIndex { pagerSelection = nextIndex }
+        }
+    }
+
+    /// Old photo exits right over 100ms; the decoded newest photo then enters from the left over 220ms.
+    /// A newer photo supersedes an in-flight transition; the older task must not write back over it.
+    private func consumeReviewFollow() async {
+        guard let review else { return }
+        let revision = review.followRevision
+        guard revision != appliedFollowRevision else { return }
+        let updated = files
+        followEpoch += 1
+        let epoch = followEpoch
+        pendingFollowID = nil
+        followingLatest = false
+        reviewTap.blocked = false
+        guard review.followLatest, let target = updated.first else {
+            applyReviewFiles(updated, jumpToNewest: false)
+            if followEpoch == epoch { appliedFollowRevision = revision }
+            return
+        }
+        pendingFollowID = target.id
+        defer {
+            if followEpoch == epoch {
+                pendingFollowID = nil
+                followingLatest = false
+                reviewTap.blocked = false
+                followIncoming = false
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { followVisibility = 1 }
+            }
+        }
+        _ = await loadHighResolution(file: target, awaitExisting: true,
+                                     allowCameraRequest: isSessionConnected, interactivePriority: true)
+        guard followEpoch == epoch, !Task.isCancelled else { return }
+        guard highResolutionImages[target.id] != nil else { return }
+        guard review.followRevision == revision else { return }
+        followingLatest = true
+        reviewTap.blocked = true
+        reviewTap.cancel()
+        followIncoming = false
+        await animateFollowVisibility(to: 0, milliseconds: 100)
+        guard followEpoch == epoch, !Task.isCancelled else { return }
+        followIncoming = true
+        applyReviewFiles(updated, jumpToNewest: true)
+        await animateFollowVisibility(to: 1, milliseconds: 220)
+        guard followEpoch == epoch, !Task.isCancelled else { return }
+        appliedFollowRevision = revision
+    }
+
+    private func animateFollowVisibility(to value: CGFloat, milliseconds: Int) async {
+        withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: Double(milliseconds) / 1000)) {
+            followVisibility = value
+        }
+        try? await Task.sleep(for: .milliseconds(milliseconds))
+    }
+
     private var currentEntryID: String? {
         guard previewEntries.indices.contains(index) else { return nil }
         return previewPages[index].id
@@ -1029,6 +1083,66 @@ struct PhotoPreviewView: View {
     private var currentPhoto: CameraFile? {
         guard previewEntries.indices.contains(index) else { return nil }
         return previewEntries[index].file
+    }
+
+    /// Split out of the preview stage so the stage's view builder stays within
+    /// the type checker's time limit.
+    private var previewToolControls: some View {
+        let toolSelection = currentPhoto.map { file in
+            PhotoPreviewToolSelection(
+                file: file,
+                canCollapse: photoPreviewCollectionIndex(previewEntries, memberIndex: index) != nil
+            )
+        }
+        let inputsEnabled = !followingLatest && !closing && effectsFile == nil
+            && !cropPresented && !cropRestoring && !magnificationActive
+        let editEnabled = !burstTransitionBusy && !queueFlightActive && queueDragDirection != .upward
+        let collapseEnabled = !queueFlightActive && queueDragDirection != .upward && queueFlightTask == nil
+        let trailingInset: CGFloat = landscapeReview ? 12 : (review != nil ? 20 : 76)
+        return PhotoPreviewTools(
+            selection: toolSelection,
+            burstTransitionInProgress: burstTransitionBusy,
+            isReview: review != nil,
+            landscapeReview: landscapeReview,
+            followLatest: review?.followLatest == true,
+            effectsAvailable: effectsStore != nil && effectsDirectory != nil,
+            effectsEnabled: effectsStore?.isEnabled == true,
+            histogramMode: histogramMode,
+            feedback: pageFeedback,
+            inputsEnabled: inputsEnabled,
+            editEnabled: editEnabled,
+            collapseEnabled: collapseEnabled,
+            rotationEnabled: !burstTransitionBusy,
+            onCollapse: { collapseCurrentBurst() },
+            onEffects: { file in
+                ZTransferHaptics.shared.play(.navigation)
+                effectsFile = file
+                effectsRotation = rotationQuarterTurns
+                effectsPresented = true
+            },
+            onCrop: { _ in
+                ZTransferHaptics.shared.play(.navigation)
+                cropPreparation.reset()
+                cropRetry = 0
+                cropLoadingVisible = false
+                cropCloseTask?.cancel()
+                cropEditor.reset()
+                cropEnteredAt = ProcessInfo.processInfo.systemUptime
+                withAnimation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18)) { cropPresented = true }
+            },
+            onHistogram: { histogramPreferences.mode = histogramMode.next },
+            onRotate: {
+                withAnimation(photoPreviewRotationAnimation) { rotationDegrees -= 90 }
+                rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
+            },
+            onFollow: { review?.setFollowLatest(!(review?.followLatest == true)) }
+        )
+        .compositingGroup()
+        .modifier(PhotoPreviewPresentationOpacity(clock: presentation, factor: burstPagerAlpha * (cropPresented ? 0 : 1)))
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.18), value: cropPresented)
+        .offset(x: UIScreen.main.bounds.width * burstPagerSlide)
+        .padding(.trailing, trailingInset)
+        .padding(.bottom, landscapeReview ? 8 : photoPreviewControlsBottomPadding)
     }
 
 
@@ -1243,6 +1357,16 @@ struct PhotoPreviewView: View {
         allowCameraRequest: Bool
     ) async -> Bool {
         guard previewEntries.indices.contains(page), let file = previewEntries[page].file else { return false }
+        return await loadHighResolution(file: file, awaitExisting: awaitExisting, allowCameraRequest: allowCameraRequest)
+    }
+
+    @MainActor
+    private func loadHighResolution(
+        file: CameraFile,
+        awaitExisting: Bool = false,
+        allowCameraRequest: Bool,
+        interactivePriority: Bool = false
+    ) async -> Bool {
         let id = file.id
         if isVideo(file) {
             fhdUnavailable.insert(id)
@@ -1265,7 +1389,15 @@ struct PhotoPreviewView: View {
         highResolutionLoading.insert(id)
         defer { highResolutionLoading.remove(id) }
         let decoded: CameraPhotoPreviewContent?
-        if let review { decoded = try? await loadRemoteReviewPreview(review) { try await session.preview(handle: id) } }
+        if let review {
+            if interactivePriority {
+                decoded = try? await session.withInteractivePreviewPriority {
+                    try await loadRemoteReviewPreview(review) { try await session.preview(handle: id) }
+                }
+            } else {
+                decoded = try? await loadRemoteReviewPreview(review) { try await session.preview(handle: id) }
+            }
+        }
         else if let data = try? await session.preview(handle: id) { decoded = try? await loadCameraPhotoPreviewContent(data) }
         else { decoded = nil }
         guard let content = decoded,
@@ -1275,7 +1407,7 @@ struct PhotoPreviewView: View {
         }
         // A page change can trim this handle while its synchronous codec is
         // finishing. Recheck the live retention window before repopulating it.
-        guard retainedPhotoPreviewIDs(entries: previewEntries, currentIndex: index).contains(id) else { return false }
+        guard previewKeepIDs().contains(id) else { return false }
         fhdOrientations[id] = content.orientation
         fhdHistograms[id] = content.histogram
         highResolutionImages[id] = content.image
@@ -1294,8 +1426,7 @@ struct PhotoPreviewView: View {
 
     @MainActor
     private func finishRemoteImageLoad(file: CameraFile, content: CameraPhotoPreviewContent?) {
-        guard !Task.isCancelled,
-              retainedPhotoPreviewIDs(entries: previewEntries, currentIndex: index).contains(file.id) else { return }
+        guard !Task.isCancelled, previewKeepIDs().contains(file.id) else { return }
         if let content {
             fhdOrientations[file.id] = content.orientation
             fhdHistograms[file.id] = content.histogram
@@ -1328,9 +1459,15 @@ struct PhotoPreviewView: View {
         }
     }
 
+    private func previewKeepIDs() -> Set<UInt32> {
+        var keep = retainedPhotoPreviewIDs(entries: previewEntries, currentIndex: index)
+        if let pendingFollowID { keep.insert(pendingFollowID) }
+        return keep
+    }
+
     @MainActor
     private func trimPreviewState() {
-        let keep = retainedPhotoPreviewIDs(entries: previewEntries, currentIndex: index)
+        let keep = previewKeepIDs()
         highResolutionImages = highResolutionImages.filter { keep.contains($0.key) }
         fhdOrientations = fhdOrientations.filter { keep.contains($0.key) }
         fhdHistograms = fhdHistograms.filter { keep.contains($0.key) }
@@ -1905,6 +2042,8 @@ struct PhotoPreviewTools: View {
     let selection: PhotoPreviewToolSelection?
     var burstTransitionInProgress = false
     let isReview: Bool
+    var landscapeReview = false
+    var followLatest = false
     let effectsAvailable: Bool
     let effectsEnabled: Bool
     let histogramMode: RemoteHistogramMode
@@ -1918,6 +2057,7 @@ struct PhotoPreviewTools: View {
     let onCrop: (CameraFile) -> Void
     let onHistogram: () -> Void
     let onRotate: () -> Void
+    var onFollow: () -> Void = {}
     @State private var retained: PhotoPreviewToolSelection?
 
     private func accepts(_ file: CameraFile) -> Bool {
@@ -1959,7 +2099,20 @@ struct PhotoPreviewTools: View {
                             .padding(.trailing, metrics.gap)
                         }
                         PreviewActionVisibility(visible: image) {
-                            HStack(spacing: metrics.gap) {
+                            let imageTools = Group {
+                                if isReview {
+                                    Button(action: onFollow) {
+                                        Text(verbatim: "NEW")
+                                            .zTransferTypography(.labelSmall, weight: .bold)
+                                            .foregroundStyle(ZTransferColors.accentBlue)
+                                            .lineLimit(1)
+                                            .frame(width: metrics.size, height: metrics.size)
+                                    }
+                                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: metrics.size / 2,
+                                        active: followLatest, activeColor: ZTransferColors.accentBlue))
+                                    .accessibilityLabel(AppLocalized.resource("remote_review_follow"))
+                                    .accessibilityValue(followLatest ? "1" : "0")
+                                }
                                 PreviewCircleButton(icon: .histogram, accessibilityKey: "cd_preview_histogram",
                                     active: histogramMode != .off, histogramRGB: histogramMode == .rgb, size: metrics.size) {
                                     if image && accepts(file) { onHistogram() }
@@ -1967,6 +2120,11 @@ struct PhotoPreviewTools: View {
                                 PreviewCircleButton(icon: .rotateLeft, accessibilityKey: "cd_rotate_photo", size: metrics.size) {
                                     if image && accepts(file) && rotationEnabled { onRotate() }
                                 }
+                            }
+                            if isReview && landscapeReview {
+                                VStack(spacing: metrics.gap) { imageTools }
+                            } else {
+                                HStack(spacing: metrics.gap) { imageTools }
                             }
                         }
                     }
@@ -2296,6 +2454,7 @@ private struct PreviewImage: View {
     let cropTop: CGFloat
     let cropEditor: PhotoCropEditingState
     let zoomEnabled: Bool
+    var showsLoadingSpinner = true
     let loadEnabled: Bool
     let allowRemoteThumbnailFallback: Bool
     let onDisplayImage: (UIImage?) -> Void
@@ -2352,7 +2511,7 @@ private struct PreviewImage: View {
                     if remoteThumbnailUnavailable {
                         Text(AppLocalized.resource("no_preview"))
                             .foregroundStyle(.white.opacity(0.8))
-                    } else {
+                    } else if showsLoadingSpinner {
                         ProgressView().tint(.white)
                     }
                 }
@@ -2681,9 +2840,16 @@ private struct PreviewInfoText: View {
 
 private struct PreviewExifBar: View {
     let exif: PhotoExif
+    var vertical = false
     var body: some View {
         let values = [exif.aperture, exif.shutterSpeed, exif.iso, exif.exposureCompensation, exif.focalLength].compactMap { $0 }
-        if !values.isEmpty {
+        if vertical {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                    PreviewInfoText(text: value)
+                }
+            }
+        } else if !values.isEmpty {
             PreviewInfoText(text: values.joined(separator: "\u{2009}·\u{2009}"))
         }
     }

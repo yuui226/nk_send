@@ -68,6 +68,36 @@ final class RemoteReviewPresentationTests: XCTestCase {
         XCTAssertTrue(state.allowed)
         state.observe([])
         XCTAssertFalse(state.allowed)
+        state.begin(.init(x: 10, y: 10))
+        state.cancel()
+        XCTAssertFalse(state.allowed)
+        state.blocked = true
+        state.begin(.init(x: 10, y: 10))
+        state.observe([.init(x: 11, y: 10)])
+        XCTAssertFalse(state.allowed)
+    }
+
+    func testFollowMergeKeepsNewestFirstAndReusesAnExistingKey() {
+        func photo(_ id: UInt32, _ name: String) -> RemoteReviewPhoto {
+            RemoteReviewPhoto(files: [CameraFile(id: id, storageID: 1, format: 0x3801, size: 10,
+                fileName: name, captureDate: nil, isProtected: false)])
+        }
+        let older = RemoteReviewListItem(key: 1, photo: photo(1, "A.JPG"))
+        let current = RemoteReviewListItem(key: 2, photo: photo(2, "B.JPG"))
+        let newest = photo(3, "C.JPG")
+        let merged = remoteReviewFollowMerge(existing: [current, older], recent: [],
+            incoming: [newest], preferredKeys: [2: 2, 1: 1])
+        XCTAssertTrue(merged.newestChanged)
+        XCTAssertEqual(merged.items.map(\.key), [3, 2, 1])
+        let companion = RemoteReviewPhoto(files: [
+            CameraFile(id: 9, storageID: 1, format: 0x3801, size: 10, fileName: "C.NEF", captureDate: nil, isProtected: false),
+            CameraFile(id: 3, storageID: 1, format: 0x3801, size: 10, fileName: "C.JPG", captureDate: nil, isProtected: false),
+        ])
+        let reused = remoteReviewFollowMerge(existing: merged.items, recent: merged.recent,
+            incoming: [companion], preferredKeys: [2: 2, 1: 1, 3: 3])
+        XCTAssertFalse(reused.newestChanged)
+        XCTAssertEqual(reused.items.map(\.key), [3, 2, 1])
+        XCTAssertEqual(reused.items.first?.photo.files.count, 2)
     }
 
     func testDismissalRetainsGateUntilFadeEndsAndCancellationDoesNotClose() async throws {

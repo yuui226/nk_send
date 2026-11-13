@@ -1,3 +1,7 @@
+# iOS 打包
+
+正式包上传用 `release-ios.command`。它把当前工作区打成 Release。构建号每次自动加一，不用填写。运行时可以填写版本号，直接回车则保持当前版本；小于当前版本会被拒绝，因为苹果不接受更小的版本。版本按每一段整数比较，`2.05` 与 `2.5` 相同，`2.06` 更高。保持 `2.05` 只能再上传 TestFlight；要提交商店审核，版本号必须高于已经上架的版本。本地检查和苹果校验通过后上传 App Store Connect。不提交 App 审核，也不点「发布此版本」。版本号和构建号写回 `project.yml` 和 `project.pbxproj`；上传开始前失败会改回去。日志在 `ios/.build/appstore-日期/build号/`。需要 Xcode 里已经登录可上传的 Apple 账户。非交互运行可设置 `IOS_MARKETING_VERSION`。
+
 # iOS Debug 打包
 
 双击 `d-b-ios.command`，或在仓库根目录执行：

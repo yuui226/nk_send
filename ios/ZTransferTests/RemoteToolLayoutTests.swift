@@ -110,7 +110,7 @@ final class RemoteToolLayoutTests: XCTestCase {
                 XCTAssertEqual(Array(layout.order.prefix(4)), [.fps, .grid, .hd, .lut])
                 XCTAssertEqual(layout.hidden, ["grid"])
                 XCTAssertEqual(layout.hiddenTools, [.grid])
-                XCTAssertEqual(RemoteTool.allCases.count, 19)
+                XCTAssertEqual(RemoteTool.allCases.count, 21)
                 layout.move(.lut, to: 0)
                 let restored = RemoteToolLayout(defaults: defaults, movie: mode == "movie", onHide: { _ in })
                 XCTAssertEqual(restored.order.first, .lut); XCTAssertFalse(restored.visible(.grid))
@@ -130,6 +130,41 @@ final class RemoteToolLayoutTests: XCTestCase {
             XCTAssertTrue(movie.visible(.computerControl))
             XCTAssertFalse(RemoteToolLayout(defaults: defaults, movie: false, onHide: { _ in }).visible(.computerControl))
             XCTAssertTrue(RemoteToolLayout(defaults: defaults, movie: true, onHide: { _ in }).visible(.computerControl))
+        }
+    }
+
+    func testMirrorPersistsAndHidingTurnsItOffWithoutChangingOtherEffects() {
+        withDefaults { defaults in
+            var tools = RemoteToolPreferences(defaults: defaults)
+            XCTAssertFalse(tools.mirror)
+            XCTAssertTrue(tools.layout(movie: false).visible(.mirror))
+            XCTAssertTrue(tools.layout(movie: true).visible(.mirror))
+            tools.mirror = true
+            tools.level = true
+            tools = RemoteToolPreferences(defaults: defaults)
+            XCTAssertTrue(tools.mirror)
+            tools.layout(movie: false).setVisible(.mirror, false)
+            XCTAssertFalse(tools.mirror)
+            XCTAssertTrue(tools.level)
+            tools = RemoteToolPreferences(defaults: defaults)
+            XCTAssertFalse(tools.mirror)
+            XCTAssertFalse(tools.layout(movie: false).visible(.mirror))
+            XCTAssertTrue(tools.layout(movie: true).visible(.mirror))
+            tools.layout(movie: false).setVisible(.mirror, true)
+            XCTAssertFalse(tools.mirror)
+        }
+    }
+
+    func testMirrorUpgradeAppendsWithoutReorderingExistingTools() {
+        withDefaults { defaults in
+            for movie in [false, true] {
+                let mode = movie ? "movie" : "photo"
+                let saved = RemoteTool.regular.filter { $0 != .mirror && $0.available(movie: movie) }.reversed()
+                defaults.set(saved.map(\.id).joined(separator: ","), forKey: "remote_tool_order_\(mode)")
+                defaults.set(true, forKey: "remote_picture_control_placement_v1_\(mode)")
+                let layout = RemoteToolLayout(defaults: defaults, movie: movie, onHide: { _ in })
+                XCTAssertEqual(layout.order, saved + [.mirror])
+            }
         }
     }
 }

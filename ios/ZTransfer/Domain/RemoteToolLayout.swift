@@ -9,6 +9,7 @@ enum RemoteTool: String, CaseIterable, Identifiable, Sendable {
     case focusArea = "focus_area"
     case waveform, focusMode = "focus_mode", focusFrame = "focus_frame", lut, pictureControl = "picture_control", meter
     case selfTimer = "self_timer"
+    case mirror
     case lock
     case computerControl = "computer_control", rotate
 

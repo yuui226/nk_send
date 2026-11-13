@@ -860,6 +860,11 @@ struct RemoteView: View {
             }) {
                 tools.meter.toggle()
             })
+        case .mirror: return AnyView(configuredRemoteToolButton(.mirror, movie: movie,
+            active: tools.mirror, accessibilityLabel: AppLocalized.resource("remote_tool_mirror"),
+            label: { toolMark(.mirror) }) {
+                tools.mirror.toggle()
+            })
         case .selfTimer: return AnyView(configuredRemoteToolButton(.selfTimer, movie: movie,
             active: tools.selfTimerSeconds > 0, accessibilityLabel: AppLocalized.resource("remote_tool_self_timer"),
             label: { RemoteSelfTimerIcon(seconds: tools.selfTimerSeconds) }) {
@@ -1324,6 +1329,7 @@ struct RemoteView: View {
         let meters = RemoteMonitorMeterLayout(size: size,
             landscape: layoutOrientation.isLandscape, movie: model.movieMode,
             showExposure: tools.meter, audioEnabled: isSessionConnected && model.movieMode && tools.audio)
+        let mirrorEnabled = tools.mirror && tools.layout(movie: model.movieMode).visible(.mirror)
         return ZStack {
             RadialGradient(
                 colors: [Color(white: 0.38), Color(white: 0.18)],
@@ -1335,7 +1341,8 @@ struct RemoteView: View {
                 let metadata = model.frameMetadata
                 let focusBlock = focusDisplayState(now: ProcessInfo.processInfo.systemUptime, metadata: metadata)
                 let cameraFrames = focusBlock == nil ? metadata?.focusFrames ?? [] : []
-                RemoteZoomableViewfinder(aspect: aspect, imageSize: image.size, metadata: model.frameMetadata, onFocus: {
+                RemoteZoomableViewfinder(aspect: aspect, imageSize: image.size, metadata: model.frameMetadata,
+                    mirrored: mirrorEnabled, onFocus: {
                     model.focus(at: $0, coordinateSize: image.size)
                 }) {
                     ZStack {
@@ -1390,9 +1397,11 @@ struct RemoteView: View {
                     waveformMode: tools.waveform,
                     startInset: meters.scopeStartInset,
                     informationInset: layoutOrientation.isLandscape && dispMode == .camera && isSessionConnected
-                        ? RemoteDispLayout.informationInset : 0).equatable()
+                        ? RemoteDispLayout.informationInset : 0,
+                    mirrored: mirrorEnabled).equatable()
                 if model.levelVisible, let roll = model.levelRoll {
                     RemoteHorizonOverlay(roll: Float(roll), pitch: model.levelPitch.map(Float.init)).equatable()
+                        .scaleEffect(x: mirrorEnabled ? -1 : 1)
                         .allowsHitTesting(false)
                 }
                 if meters.audio.height > 0, let levels = model.frameMetadata?.soundLevels {
@@ -1404,6 +1413,7 @@ struct RemoteView: View {
                 }
             } else if tools.grid != .off {
                 RemoteFramingGridOverlay(grid: tools.grid, aspect: aspect).equatable()
+                    .scaleEffect(x: mirrorEnabled ? -1 : 1)
                     .allowsHitTesting(false)
             }
             if tools.fps, model.state.fps > 0 {
@@ -1922,12 +1932,13 @@ struct RemoteMonitorScopesOverlay: View, Equatable {
     let waveformMode: RemoteWaveformMode
     let startInset: CGFloat
     let informationInset: CGFloat
+    var mirrored = false
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.histogram == rhs.histogram && lhs.histogramRGB == rhs.histogramRGB &&
         lhs.waveformImage === rhs.waveformImage && lhs.histogramMode == rhs.histogramMode &&
         lhs.waveformMode == rhs.waveformMode && lhs.startInset == rhs.startInset &&
-        lhs.informationInset == rhs.informationInset
+        lhs.informationInset == rhs.informationInset && lhs.mirrored == rhs.mirrored
     }
 
     var body: some View {
@@ -1948,7 +1959,7 @@ struct RemoteMonitorScopesOverlay: View, Equatable {
                 }
                 if waveformMode != .off, let waveformImage {
                     RemoteScopeCard(label: waveformMode == .rgb ? "RGB" : "Y′", range: "0–100%") {
-                        RemoteWaveformOverlay(image: waveformImage)
+                        RemoteWaveformOverlay(image: waveformImage, mirrored: mirrored)
                     }
                     .frame(width: chartWidth, height: chartHeight)
                 }
@@ -2035,6 +2046,7 @@ private struct RemoteHistogramOverlay: View, Equatable {
 
 private struct RemoteWaveformOverlay: View {
     let image: CGImage
+    var mirrored = false
     var body: some View {
         Canvas { context, size in
             let showLabels = size.height >= 34
@@ -2057,8 +2069,13 @@ private struct RemoteWaveformOverlay: View {
             }
             // Android WaveformOverlay draws the worker-produced density bitmap
             // with medium filtering. One draw replaces up to 32,768 tiny fills.
-            context.draw(Image(decorative: image, scale: 1, orientation: .up).interpolation(.medium),
-                in: CGRect(x: plotInset, y: 0, width: plotWidth, height: size.height))
+            let plot = CGRect(x: mirrored ? 0 : plotInset, y: 0, width: plotWidth, height: size.height)
+            var imageContext = context
+            if mirrored {
+                imageContext.translateBy(x: plotInset + plotWidth, y: 0)
+                imageContext.scaleBy(x: -1, y: 1)
+            }
+            imageContext.draw(Image(decorative: image, scale: 1, orientation: .up).interpolation(.medium), in: plot)
         }
         .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 5))
     }

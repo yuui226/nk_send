@@ -14,12 +14,18 @@ struct RemoteViewfinderViewport {
         offset = bounded(offset, zoom: scale, aspect: aspect)
     }
 
-    mutating func transform(centroid: CGPoint, pan: CGSize, zoom: Float, aspect: Float) {
+    mutating func transform(centroid: CGPoint, pan: CGSize, zoom: Float, aspect: Float, mirrored: Bool = false) {
         guard zoom.isFinite, zoom > 0 else { return }
         let next = min(8, max(1, scale * zoom))
         let ratio = next / scale
-        let point = SIMD2(Float(centroid.x), Float(centroid.y))
-        let delta = SIMD2(Float(pan.width), Float(pan.height))
+        // Keep the stored viewport in camera coordinates. Reflect the screen gesture
+        // first so pan and pinch stay under the fingers when the display is mirrored.
+        var point = SIMD2(Float(centroid.x), Float(centroid.y))
+        var delta = SIMD2(Float(pan.width), Float(pan.height))
+        if mirrored {
+            point.x = size.x - point.x
+            delta.x = -delta.x
+        }
         offset = bounded(offset * ratio + (point - size / 2) * (1 - ratio) + delta, zoom: next, aspect: aspect)
         scale = next
     }
@@ -47,9 +53,10 @@ struct RemoteViewfinderViewport {
 
     /// Compose inverse-transforms input inside the graphics layer before AF mapping.
     /// Reject the fixed image window's letterbox before performing the inverse.
-    func focusPoint(at point: CGPoint, aspect: Float) -> RemoteFocusPoint? {
+    func focusPoint(at point: CGPoint, aspect: Float, mirrored: Bool = false) -> RemoteFocusPoint? {
         let image = RemoteFramingGrid.fit(width: size.x, height: size.y, aspect: aspect)
-        let x = Float(point.x), y = Float(point.y)
+        let sample = mirrored ? CGPoint(x: CGFloat(size.x) - point.x, y: point.y) : point
+        let x = Float(sample.x), y = Float(sample.y)
         guard image.width > 0, image.height > 0,
               x >= image.left, x <= image.right, y >= image.top, y <= image.bottom else { return nil }
         let original = (SIMD2(x, y) - size / 2 - offset) / scale + size / 2

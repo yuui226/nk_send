@@ -31,6 +31,7 @@ struct RemoteToolMark: View {
         case .lut: text("LUT", 10)
         case .meter: text("±EV", 10)
         case .selfTimer: RemoteSelfTimerIcon().foregroundStyle(tint)
+        case .mirror: Canvas { context, size in drawMirror(in: &context, size: size) }.frame(width: 19, height: 19)
         case .computerControl: text("PC", 11)
         case .whiteBalance: text("WB", 11)
         case .focusMode: text("MODE", 9)
@@ -114,6 +115,20 @@ struct RemoteToolMark: View {
         case .level: drawLevel(in: &context, size: size)
         default: break
         }
+    }
+
+    /// ic_monitor_mirror.xml viewport 24. Center ticks plus two outward triangles.
+    private func drawMirror(in context: inout GraphicsContext, size: CGSize) {
+        context.scaleBy(x: size.width / 24, y: size.height / 24)
+        var path = Path()
+        path.move(to: CGPoint(x: 12, y: 3)); path.addLine(to: CGPoint(x: 12, y: 6))
+        path.move(to: CGPoint(x: 12, y: 10.5)); path.addLine(to: CGPoint(x: 12, y: 13.5))
+        path.move(to: CGPoint(x: 12, y: 18)); path.addLine(to: CGPoint(x: 12, y: 21))
+        path.move(to: CGPoint(x: 8.5, y: 5.5)); path.addLine(to: CGPoint(x: 3, y: 18.5))
+        path.addLine(to: CGPoint(x: 8.5, y: 18.5)); path.closeSubpath()
+        path.move(to: CGPoint(x: 15.5, y: 5.5)); path.addLine(to: CGPoint(x: 21, y: 18.5))
+        path.addLine(to: CGPoint(x: 15.5, y: 18.5)); path.closeSubpath()
+        context.stroke(path, with: .color(tint), style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
     }
 
     private func drawLevel(in context: inout GraphicsContext, size: CGSize) {

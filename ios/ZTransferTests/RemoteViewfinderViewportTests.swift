@@ -3,6 +3,48 @@ import XCTest
 
 final class RemoteViewfinderViewportTests: XCTestCase {
     // ViewfinderViewportTest.kt: the two horizon cases are assigned to T08.
+    func testMirroredPinchKeepsTheCameraPointUnderTheFinger() {
+        for aspect in [Float(3) / 2, Float(16) / 9, Float(16) / 9 * 1.5] {
+            for size in [CGSize(width: 600, height: 1200), CGSize(width: 1200, height: 600)] {
+                var viewport = RemoteViewfinderViewport()
+                viewport.resize(size, aspect: aspect)
+                let tap = CGPoint(x: size.width * 0.65, y: size.height * 0.45)
+                let original = CGPoint(x: size.width - tap.x, y: tap.y)
+                viewport.transform(centroid: tap, pan: .zero, zoom: 2, aspect: aspect, mirrored: true)
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                let displayedX = center.x - (original.x - center.x) * CGFloat(viewport.scale) - CGFloat(viewport.offset.x)
+                let displayedY = center.y + (original.y - center.y) * CGFloat(viewport.scale) + CGFloat(viewport.offset.y)
+                XCTAssertEqual(displayedX, tap.x, accuracy: 0.001)
+                XCTAssertEqual(displayedY, tap.y, accuracy: 0.001)
+                let focus = viewport.focusPoint(at: tap, aspect: aspect, mirrored: true)
+                let direct = viewport.focusPoint(at: original, aspect: aspect)
+                XCTAssertEqual(focus?.x ?? -1, direct?.x ?? -2, accuracy: 0.0001)
+                XCTAssertEqual(focus?.y ?? -1, direct?.y ?? -2, accuracy: 0.0001)
+            }
+        }
+    }
+
+    func testMirroredPanFollowsTheFingerAndClampsAtBothEdges() {
+        let aspect: Float = 5 / 3
+        for pan in [CGSize(width: 80, height: -30), CGSize(width: 10000, height: -10000), CGSize(width: -10000, height: 10000)] {
+            var normal = RemoteViewfinderViewport()
+            var mirrored = RemoteViewfinderViewport()
+            normal.resize(CGSize(width: 1000, height: 600), aspect: aspect)
+            mirrored.resize(CGSize(width: 1000, height: 600), aspect: aspect)
+            normal.transform(centroid: CGPoint(x: 500, y: 300), pan: .zero, zoom: 2, aspect: aspect)
+            mirrored.transform(centroid: CGPoint(x: 500, y: 300), pan: .zero, zoom: 2, aspect: aspect)
+            normal.transform(centroid: CGPoint(x: 500, y: 300), pan: pan, zoom: 1, aspect: aspect)
+            mirrored.transform(centroid: CGPoint(x: 500, y: 300), pan: pan, zoom: 1, aspect: aspect, mirrored: true)
+            XCTAssertEqual(normal.offset.x, -mirrored.offset.x, accuracy: 0.001)
+            XCTAssertEqual(normal.offset.y, mirrored.offset.y, accuracy: 0.001)
+            let normalCrop = normal.visibleRegion(aspect: aspect)
+            let mirroredCrop = mirrored.visibleRegion(aspect: aspect)
+            XCTAssertEqual(normalCrop.minX, 1 - mirroredCrop.maxX, accuracy: 0.001)
+            XCTAssertEqual(normalCrop.maxX, 1 - mirroredCrop.minX, accuracy: 0.001)
+            XCTAssertEqual(normalCrop.minY, mirroredCrop.minY, accuracy: 0.001)
+        }
+    }
+
     func testCenteredZoomAndPanKeepCropInsideImage() {
         var viewport = RemoteViewfinderViewport()
         let aspect: Float = 5 / 3

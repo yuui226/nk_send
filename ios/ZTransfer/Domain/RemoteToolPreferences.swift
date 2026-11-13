@@ -38,6 +38,7 @@ final class RemoteToolPreferences: ObservableObject {
     @Published var hd: Bool { didSet { save(hd, oldValue, "remote_hd") } }
     @Published var audio: Bool { didSet { save(audio, oldValue, "remote_audio_levels_visible") } }
     @Published var level: Bool { didSet { save(level, oldValue, "remote_level") } }
+    @Published var mirror: Bool { didSet { save(mirror, oldValue, "remote_mirror") } }
     @Published var focusFrame: Bool { didSet { save(focusFrame, oldValue, "remote_focus_frame") } }
     @Published var meter: Bool { didSet { save(meter, oldValue, "remote_exposure_meter") } }
     @Published var selfTimerSeconds: Int { didSet { save(selfTimerSeconds, oldValue, "remote_self_timer_seconds") } }
@@ -79,6 +80,7 @@ final class RemoteToolPreferences: ObservableObject {
         hd = bool("remote_hd")
         audio = bool("remote_audio_levels_visible", true)
         level = bool("remote_level")
+        mirror = bool("remote_mirror")
         focusFrame = bool("remote_focus_frame", true)
         meter = bool("remote_exposure_meter")
         let timerSeconds = defaults.integer(forKey: "remote_self_timer_seconds")
@@ -107,6 +109,7 @@ final class RemoteToolPreferences: ObservableObject {
         case .exposure: exposure = .off
         case .desqueeze: desqueeze = 1
         case .level: level = false
+        case .mirror: mirror = false
         case .focusFrame: focusFrame = false
         case .meter: meter = false
         case .selfTimer: selfTimerSeconds = 0

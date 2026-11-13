@@ -33,6 +33,35 @@ final class RemoteReviewDisplaySnapshot {
     }
 }
 
+/// One displayed review row. `key` stays stable when a later companion reuses it.
+struct RemoteReviewListItem: Equatable {
+    var key: UInt32
+    var photo: RemoteReviewPhoto
+    var file: CameraFile { photo.file }
+}
+
+func remoteReviewDistinct(_ items: [RemoteReviewListItem]) -> [RemoteReviewListItem] {
+    var seen = Set<UInt32>()
+    return items.filter { seen.insert($0.key).inserted }
+}
+
+/// RemotePhotoReview's poll merge. Newest rows stay first; a reused key replaces
+/// the older copy instead of inserting a second page.
+func remoteReviewFollowMerge(
+    existing: [RemoteReviewListItem],
+    recent: [RemoteReviewListItem],
+    incoming: [RemoteReviewPhoto],
+    preferredKeys: [UInt32: UInt32]
+) -> (items: [RemoteReviewListItem], recent: [RemoteReviewListItem], newestChanged: Bool) {
+    let head = incoming.map { photo in
+        let reused = photo.files.lazy.compactMap { preferredKeys[$0.id] }.first
+        return RemoteReviewListItem(key: reused ?? photo.id, photo: photo)
+    }
+    let newestChanged = head.first?.key != existing.first?.key
+    let nextRecent = remoteReviewDistinct(head + recent)
+    return (remoteReviewDistinct(nextRecent + existing), nextRecent, newestChanged)
+}
+
 /// RemotePhotoReview.kt: a frozen catalog per opening, one compatibility stop,
 /// and a generation boundary that prevents late reads entering a new opening.
 @MainActor
@@ -40,6 +69,8 @@ final class RemotePhotoReviewModel: ObservableObject {
     @Published private(set) var active = false
     @Published private(set) var loading = false
     @Published private(set) var failed = false
+    @Published private(set) var followLatest: Bool
+    @Published private(set) var followRevision = 0
     @Published private(set) var photos: [RemoteReviewPhoto] = [] {
         didSet { displayCache = nil }
     }
@@ -57,25 +88,39 @@ final class RemotePhotoReviewModel: ObservableObject {
     private let restartLiveView: () -> Void
     private let isConnected: () -> Bool
     private let onActiveChanged: (Bool) -> Void
+    private let defaults: UserDefaults
     private var generation = UUID()
     private var catalog: RemoteReviewCatalog?
     private var loadTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
     private var compatibilityTask: Task<Void, Never>?
     private var restartRequired = false
     private var closing = false
+    private var displayed: [RemoteReviewListItem] = []
+    private var recent: [RemoteReviewListItem] = []
+    private var knownHandles = Set<UInt32>()
 
     init(frames: RemoteReviewFrameGate,
          openCatalog: @escaping () async throws -> RemoteReviewCatalog,
          endLiveView: @escaping () async -> Void,
          restartLiveView: @escaping () -> Void,
          isConnected: @escaping () -> Bool,
-         onActiveChanged: @escaping (Bool) -> Void = { _ in }) {
+         onActiveChanged: @escaping (Bool) -> Void = { _ in },
+         defaults: UserDefaults = .standard) {
         self.frames = frames
         self.openCatalog = openCatalog
         self.endLiveView = endLiveView
         self.restartLiveView = restartLiveView
         self.isConnected = isConnected
         self.onActiveChanged = onActiveChanged
+        self.defaults = defaults
+        followLatest = defaults.bool(forKey: "remote_review_follow_latest")
+    }
+
+    func setFollowLatest(_ enabled: Bool) {
+        guard followLatest != enabled else { return }
+        followLatest = enabled
+        defaults.set(enabled, forKey: "remote_review_follow_latest")
     }
 
     func open() {
@@ -83,6 +128,11 @@ final class RemotePhotoReviewModel: ObservableObject {
         generation = UUID()
         active = true
         onActiveChanged(true)
+        pollTask?.cancel()
+        recent = []
+        displayed = []
+        knownHandles = []
+        if followRevision != 0 { followRevision = 0 }
         if !photos.isEmpty { photos = [] }
         catalog = nil
         if hasMore { hasMore = false }
@@ -129,8 +179,10 @@ final class RemotePhotoReviewModel: ObservableObject {
         try Task.checkCancellation()
         guard current(id) else { throw CancellationError() }
         catalog = snapshot
-        if photos != result { photos = result }
+        knownHandles = snapshot.handles
+        replaceDisplayed(result.map { RemoteReviewListItem(key: $0.id, photo: $0) })
         if hasMore != more { hasMore = more }
+        startFollowPolling(id)
     }
 
     func loadMore() {
@@ -145,7 +197,8 @@ final class RemotePhotoReviewModel: ObservableObject {
                 let more = await catalog.hasMore
                 try Task.checkCancellation()
                 guard current(id) else { return }
-                if photos != result { photos = result }
+                let page = result.map { RemoteReviewListItem(key: $0.id, photo: $0) }
+                replaceDisplayed(remoteReviewDistinct(recent + page))
                 if hasMore != more { hasMore = more }
             } catch is CancellationError { }
             catch { if current(id) { failed = true } }
@@ -183,7 +236,9 @@ final class RemotePhotoReviewModel: ObservableObject {
         guard active, !closing else { return }
         closing = true
         loadTask?.cancel()
+        pollTask?.cancel()
         await loadTask?.value
+        pollTask = nil
         await compatibilityTask?.value
         if restartRequired && isConnected() { restartLiveView() }
         restartRequired = false
@@ -193,5 +248,48 @@ final class RemotePhotoReviewModel: ObservableObject {
         if loading { loading = false }
         frames.resume()
         closing = false
+    }
+
+    private func replaceDisplayed(_ items: [RemoteReviewListItem]) {
+        let next = items.map(\.photo)
+        if displayed != items { displayed = items }
+        if photos != next { photos = next }
+    }
+
+    /// Every 1.5s, prepend captures that were not in the frozen handle set.
+    /// A busy camera is ignored until the next poll. Follow only advances when
+    /// the newest row actually changes.
+    private func startFollowPolling(_ id: UUID) {
+        pollTask?.cancel()
+        pollTask = Task { [self] in
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .milliseconds(1500)) }
+                catch { return }
+                guard current(id), !loading else { continue }
+                let existing = displayed
+                let known = knownHandles
+                do {
+                    let fresh = try await openCatalog()
+                    guard current(id), !loading else { continue }
+                    let freshHandles = fresh.handles
+                    if freshHandles.contains(where: { !known.contains($0) }) {
+                        let preferred = Dictionary(existing.map { ($0.file.id, $0.key) }, uniquingKeysWith: { first, _ in first })
+                        let added = freshHandles.lazy.filter { !known.contains($0) }.count
+                        let page = try await fresh.loadNextPage(pageSize: max(12, added))
+                        guard current(id), !loading else { continue }
+                        // Merge onto the list as it stands after the read. A page loaded
+                        // while the catalog was opening stays in front of the older rows.
+                        let merged = remoteReviewFollowMerge(existing: displayed, recent: recent,
+                            incoming: page, preferredKeys: preferred)
+                        recent = merged.recent
+                        replaceDisplayed(merged.items)
+                        if merged.newestChanged && followLatest { followRevision += 1 }
+                    }
+                    guard current(id) else { continue }
+                    knownHandles = freshHandles
+                } catch is CancellationError { return }
+                catch { }
+            }
+        }
     }
 }

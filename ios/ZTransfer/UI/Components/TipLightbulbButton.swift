@@ -551,7 +551,7 @@ enum TipGuides {
             item("monitor_help_\($0)_label", "monitor_help_\($0)") }),
             .init(id: "monitor_help_section_camera", items: [.selfTimer, .whiteBalance, .focusMode, .focusArea, .focusFrame, .pictureControl, .computerControl].map(tool)),
             .init(id: "monitor_help_section_exposure", items: [.histogram, .exposure, .meter, .waveform, .lut].map(tool)),
-            .init(id: "monitor_help_section_display", items: [.hd, .fps, .audio].map(tool)),
+            .init(id: "monitor_help_section_display", items: [.hd, .mirror, .fps, .audio].map(tool)),
             .init(id: "monitor_help_section_layout", items: [.grid, .level, .desqueeze, .lock, .rotate].map(tool) + [
                 .init(textKey: "monitor_help_manage", labelKey: "remote_tool_manage", mark: "manage"),
                 .init(textKey: "monitor_help_disp", labelKey: "monitor_help_disp_label", mark: "disp")])]
