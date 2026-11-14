@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_help_transfer">传输</string>
+    <string name="settings_help_camera_settings_faster">相机处于设置界面时，传图更快。</string>
     <string name="settings_help_photos">照片列表</string>
     <string name="settings_help_effects">照片效果</string>
     <string name="settings_help_appearance">外观与操作</string>

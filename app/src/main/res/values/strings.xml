@@ -14,6 +14,7 @@
     <string name="sta_reset_pairing_message">This app will forget all paired cameras. Recreate the “Connect to computer” profile on each camera, then pair again.</string>
     <string name="sta_status_searching">Searching</string>
     <string name="sta_status_pairing">Pairing</string>
+    <string name="sta_status_press_ok">Press OK</string>
     <string name="sta_pairing_incomplete">Pairing incomplete. Check the camera and retry.</string>
     <string name="sta_status_connecting">Connecting</string>
     <string name="sta_status_connected">Connected</string>
@@ -55,17 +56,15 @@
     <string name="step_camera_wifi">On the camera, enable “Connect to smart device (Wi-Fi)”</string>
     <string name="step_phone_wifi">Connect your phone\'s Wi-Fi to the camera\'s hotspot</string>
     <string name="tip_title">A faster way to connect</string>
-    <string name="tip_ap_mode">PS: This corresponds to the camera\'s Wi-Fi AP mode</string>
-    <string name="tip_body">Add “Wi-Fi connection” to the camera\'s i menu, then press i to turn it on quickly.</string>
-    <string name="tip_path">MENU → Custom Settings Menu → Controls → Customize i menu → pick a slot → Wi-Fi connection</string>
     <string name="tip_sta_title">STA connection guide</string>
     <string name="tip_sta_no_mobile_data">Photo transfers do not use mobile data.</string>
     <string name="tip_sta_first_connection">First connection</string>
-    <string name="tip_sta_quick_start">Start “Wi-Fi connection” from the i menu</string>
+    <string name="tip_sta_quick_start">Quick enable</string>
+    <string name="tip_sta_quick_enable">Place the “Wi-Fi connection” switch first in My Menu. Set a camera button to “Access top item in MY MENU” to enable it quickly.</string>
     <string name="tip_sta_step_hotspot">1. Phone: start an English-named hotspot (5 GHz recommended</string>
     <string name="tip_sta_network_alternative">) or join an existing Wi-Fi network</string>
     <string name="tip_sta_hotspot_help">The phone chooses the 5 GHz hotspot channel automatically and may select one the camera does not support. Restart the hotspot where interference is lower, or use 2.4 GHz. Changing only the band does not require pairing again.</string>
-    <string name="tip_sta_steps_after_hotspot">2. On the camera: Setup Menu/Network Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n3. On the camera, select the same network and enter its password; choose “Obtain automatically” for IP, then wait for setup to complete\n4. Press OK to open the pairing screen\n5. Tap “Connect Camera” in the app</string>
+    <string name="tip_sta_steps_after_hotspot">2. On the camera: Setup Menu/Network Menu → Connect to computer → Network settings → Create profile → Search for Wi-Fi network\n3. On the camera, select the same network and enter its password; choose “Obtain automatically” for IP, then wait for setup to complete\n4. Press OK to open the pairing screen\n5. Tap “Connect Camera” in the app\n6. When the camera shows that pairing succeeded, press OK</string>
 
     <!-- File list -->
     <string name="loading_file_list">Loading file list…</string>

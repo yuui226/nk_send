@@ -535,6 +535,11 @@ data class CameraState(
     /** Display/retry fallback after process recreation; never evidence of an active transport. */
     val rememberedConnectionMode: CameraConnectionMode? = null,
     val staConnectionStatus: StaConnectionStatus = StaConnectionStatus.IDLE,
+    /**
+     * Button-only reminder after the pairing result is acknowledged. Some bodies wait for OK
+     * once they show pairing success; others do not. This never changes the pairing flow.
+     */
+    val staPromptCameraOk: Boolean = false,
     val staDiscoveryProgress: String? = null,
     val staConnectionError: String? = null,
     /** PTP DeviceInfo identity for the active session; null when the camera did not report it. */
@@ -1982,6 +1987,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 isConnecting = false,
                 connectionType = null,
                 staConnectionStatus = StaConnectionStatus.IDLE,
+                staPromptCameraOk = false,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
                 wifiConnectionStatus = WifiConnectionStatus.IDLE,
@@ -2012,6 +2018,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 wifiRssi = null,
                 wifiConnectionStatus = WifiConnectionStatus.IDLE,
                 staConnectionStatus = StaConnectionStatus.IDLE,
+                staPromptCameraOk = false,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
             )
@@ -2115,6 +2122,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isConnecting = true,
                 staConnectionStatus = StaConnectionStatus.DISCOVERING,
+                staPromptCameraOk = false,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
                 wifiConnectionStatus = WifiConnectionStatus.IDLE,
@@ -2140,6 +2148,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                                 if (current.staConnectionStatus == StaConnectionStatus.PAIRING) current
                                 else current.copy(
                                     staConnectionStatus = StaConnectionStatus.DISCOVERING,
+                                    staPromptCameraOk = false,
                                     staDiscoveryProgress = ip,
                                 )
                             }
@@ -2189,6 +2198,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(
                             isConnecting = false,
                             staConnectionStatus = StaConnectionStatus.FAILED,
+                            staPromptCameraOk = false,
                             staDiscoveryProgress = null,
                             staConnectionError = staLastFailureMessage
                                 ?: localized.getString(com.ztransfer.R.string.sta_camera_not_found),
@@ -2217,6 +2227,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(
                             isConnecting = false,
                             staConnectionStatus = StaConnectionStatus.FAILED,
+                            staPromptCameraOk = false,
                             staDiscoveryProgress = null,
                             staConnectionError = staFailureMessageResource(error, candidateKnown = false)
                                 ?.let { localized.getString(it) }
@@ -2239,6 +2250,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             it.copy(
                                 isConnecting = false,
                                 staConnectionStatus = StaConnectionStatus.IDLE,
+                                staPromptCameraOk = false,
                                 staDiscoveryProgress = null,
                             )
                         }
@@ -2264,6 +2276,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             it.copy(
                 isConnecting = false,
                 staConnectionStatus = StaConnectionStatus.IDLE,
+                staPromptCameraOk = false,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
             )
@@ -2458,6 +2471,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         )
                         rememberStaCameraProfile(candidateCamera, ip, StaInitiatorIdentity.PAIRED_COMPUTER)
                         staLastFailureMessage = null
+                        // The result ACK is already on the camera. Keep pairing status, and only
+                        // change the button so bodies that still need OK get a harmless reminder.
+                        publishStaCameraOkPrompt(generation)
                         waitForStaService(
                             if (error.isRecovery) "post_inline_pairing_restart" else "post_pairing_restart",
                             remainingStaPairingRestartDelay(
@@ -2594,8 +2610,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 current.wirelessMode != WirelessMode.STA ||
                 current.connectionType == CameraConnectionType.USB ||
                 current.isConnectedToCamera ||
-                // A pairing ACK is not completion: keep the label through reconnect, remote
-                // permission verification and recovery. Activation/failure/cancellation ends it.
+                // A pairing ACK is not completion. Stay on the pairing status through reconnect,
+                // remote permission verification and recovery, so the OK reminder is not replaced
+                // by "connecting". Activation, failure, or cancellation ends it.
                 current.staConnectionStatus == StaConnectionStatus.PAIRING
             ) {
                 current
@@ -2603,9 +2620,26 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 current.copy(
                     isConnecting = true,
                     staConnectionStatus = StaConnectionStatus.CONNECTING,
+                    staPromptCameraOk = false,
                     staDiscoveryProgress = ip,
                     staConnectionError = null,
                 )
+            }
+        }
+    }
+
+    private fun publishStaCameraOkPrompt(generation: Long) {
+        _state.update { current ->
+            if (generation != staDiscoveryGeneration ||
+                purchaseHold ||
+                current.wirelessMode != WirelessMode.STA ||
+                current.connectionType == CameraConnectionType.USB ||
+                current.isConnectedToCamera ||
+                current.staConnectionStatus != StaConnectionStatus.PAIRING
+            ) {
+                current
+            } else {
+                current.copy(staPromptCameraOk = true)
             }
         }
     }
@@ -2623,6 +2657,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 current.copy(
                     isConnecting = true,
                     staConnectionStatus = StaConnectionStatus.PAIRING,
+                    staPromptCameraOk = false,
                     staDiscoveryProgress = ip,
                     staConnectionError = null,
                 )
@@ -2676,6 +2711,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 cameraModel = candidateCamera.deviceModel,
                 wifiConnectionStatus = WifiConnectionStatus.IDLE,
                 staConnectionStatus = StaConnectionStatus.IDLE,
+                staPromptCameraOk = false,
                 staDiscoveryProgress = null,
                 staConnectionError = null,
                 // A new connection starts with a fresh catalog, even during recovery. Publish

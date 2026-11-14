@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_help_transfer">Transfers</string>
+    <string name="settings_help_camera_settings_faster">Transfers are faster while the camera is on its settings screen.</string>
     <string name="settings_help_photos">Photo list</string>
     <string name="settings_help_effects">Photo effects</string>
     <string name="settings_help_appearance">Appearance &amp; controls</string>

@@ -151,6 +151,54 @@ class HomeConnectionPresentationTest {
     }
 
     @Test
+    fun staConnectButtonShowsCameraOkOnlyAfterPairingPrompt() {
+        assertEquals(
+            StaConnectButtonState.PAIRING,
+            staConnectButtonState(
+                connected = false,
+                status = StaConnectionStatus.PAIRING,
+                promptCameraOk = false,
+            ),
+        )
+        assertEquals(
+            StaConnectButtonState.PRESS_OK,
+            staConnectButtonState(
+                connected = false,
+                status = StaConnectionStatus.PAIRING,
+                promptCameraOk = true,
+            ),
+        )
+        assertEquals(
+            StaConnectButtonState.PAIRING.ordinal + 1,
+            StaConnectButtonState.PRESS_OK.ordinal,
+        )
+        assertEquals(
+            StaConnectButtonState.CONNECTED,
+            staConnectButtonState(
+                connected = true,
+                status = StaConnectionStatus.PAIRING,
+                promptCameraOk = true,
+            ),
+        )
+        assertEquals(
+            StaConnectButtonState.SEARCHING,
+            staConnectButtonState(
+                connected = false,
+                status = StaConnectionStatus.DISCOVERING,
+                promptCameraOk = true,
+            ),
+        )
+        assertEquals(
+            StaConnectButtonState.IDLE,
+            staConnectButtonState(
+                connected = false,
+                status = StaConnectionStatus.FAILED,
+                promptCameraOk = true,
+            ),
+        )
+    }
+
+    @Test
     fun albumScanChangesDoNotInvalidateConnectionPresentation() {
         val initial = CameraState().toHomeConnectionUiState()
         val scanning = CameraState(

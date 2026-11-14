@@ -1669,6 +1669,7 @@ private fun MainSettingsInfoBubble(
 ) {
     val sections = buildList {
         add(TipBubbleSection(stringResource(R.string.settings_help_transfer), listOf(
+            TipBubbleItem(text = stringResource(R.string.settings_help_camera_settings_faster)),
             settingsHelpItem(R.string.transfer_directory, R.string.settings_help_directory),
             settingsHelpItem(R.string.storage_mode, R.string.storage_mode_summary),
             settingsHelpItem(R.string.auto_transfer_new_media, R.string.auto_transfer_new_media_summary),

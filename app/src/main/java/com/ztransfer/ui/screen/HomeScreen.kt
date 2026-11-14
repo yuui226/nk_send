@@ -108,6 +108,7 @@ internal data class HomeConnectionUiState(
     val wirelessMode: WirelessMode,
     val isStaConnection: Boolean,
     val staConnectionStatus: StaConnectionStatus,
+    val staPromptCameraOk: Boolean,
     val staConnectionError: String?,
     val usbConnectionError: String?,
     val wifiConnectionStatus: WifiConnectionStatus,
@@ -120,6 +121,7 @@ internal fun CameraState.toHomeConnectionUiState(): HomeConnectionUiState =
         wirelessMode = wirelessMode,
         isStaConnection = isStaConnection,
         staConnectionStatus = staConnectionStatus,
+        staPromptCameraOk = staPromptCameraOk,
         staConnectionError = staConnectionError,
         usbConnectionError = usbConnectionError,
         wifiConnectionStatus = wifiConnectionStatus,
@@ -406,16 +408,11 @@ fun HomeScreen(
         animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
         label = "staConnectButtonAccent",
     )
-    val staConnectButtonState = when {
-        staConnected -> StaConnectButtonState.CONNECTED
-        state.staConnectionStatus == StaConnectionStatus.DISCOVERING ->
-            StaConnectButtonState.SEARCHING
-        state.staConnectionStatus == StaConnectionStatus.PAIRING ->
-            StaConnectButtonState.PAIRING
-        state.staConnectionStatus == StaConnectionStatus.CONNECTING ->
-            StaConnectButtonState.CONNECTING
-        else -> StaConnectButtonState.IDLE
-    }
+    val staConnectButtonState = staConnectButtonState(
+        connected = staConnected,
+        status = state.staConnectionStatus,
+        promptCameraOk = state.staPromptCameraOk,
+    )
     val staConnectButtonLabels = StaConnectButtonState.entries.map { buttonState ->
         stringResource(buttonState.labelRes)
     }
@@ -1044,12 +1041,27 @@ private data class ConnectionCardFeedback(
     val multiline: Boolean = false,
 )
 
-private enum class StaConnectButtonState(val labelRes: Int) {
+internal enum class StaConnectButtonState(val labelRes: Int) {
     IDLE(R.string.sta_connect_action),
     SEARCHING(R.string.sta_status_searching),
     PAIRING(R.string.sta_status_pairing),
+    PRESS_OK(R.string.sta_status_press_ok),
     CONNECTING(R.string.sta_status_connecting),
     CONNECTED(R.string.sta_status_connected),
+}
+
+/** Label only. Pairing status stays unchanged; the OK reminder appears after the result ACK. */
+internal fun staConnectButtonState(
+    connected: Boolean,
+    status: StaConnectionStatus,
+    promptCameraOk: Boolean,
+): StaConnectButtonState = when {
+    connected -> StaConnectButtonState.CONNECTED
+    status == StaConnectionStatus.DISCOVERING -> StaConnectButtonState.SEARCHING
+    status == StaConnectionStatus.PAIRING && promptCameraOk -> StaConnectButtonState.PRESS_OK
+    status == StaConnectionStatus.PAIRING -> StaConnectButtonState.PAIRING
+    status == StaConnectionStatus.CONNECTING -> StaConnectButtonState.CONNECTING
+    else -> StaConnectButtonState.IDLE
 }
 
 @Composable
@@ -2053,11 +2065,9 @@ private fun TipsBubble(
     val items = if (wirelessMode == WirelessMode.AP) {
         listOf(
             TipBubbleItem(
-                label = stringResource(R.string.tip_ap_mode),
-                text = stringResource(R.string.tip_body),
-            ),
-            TipBubbleItem(
-                text = stringResource(R.string.tip_path),
+                label = stringResource(R.string.tip_sta_quick_start),
+                labelColor = colors.accentOrange,
+                text = stringResource(R.string.tip_sta_quick_enable),
                 emphasized = true,
             ),
         )
@@ -2078,10 +2088,7 @@ private fun TipsBubble(
             TipBubbleItem(
                 label = stringResource(R.string.tip_sta_quick_start),
                 labelColor = colors.accentOrange,
-                text = "",
-            ),
-            TipBubbleItem(
-                text = stringResource(R.string.tip_path),
+                text = stringResource(R.string.tip_sta_quick_enable),
                 emphasized = true,
             ),
         )
