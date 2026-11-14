@@ -1451,7 +1451,10 @@ fun SettingsOverlay(
                             }
                         },
                         onDetent = haptics::tick,
+                        // The globe stays recognizable after the interface language changes.
+                        // The spoken label still follows the current language.
                         label = stringResource(R.string.language),
+                        labelIcon = Icons.Filled.Language,
                         wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                         optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
                         optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,

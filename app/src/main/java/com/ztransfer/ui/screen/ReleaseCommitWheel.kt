@@ -27,6 +27,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -101,6 +102,7 @@ internal fun <T> ReleaseCommitWheel(
     onValueCommitted: (T) -> Unit,
     modifier: Modifier = Modifier,
     label: String? = null,
+    labelIcon: ImageVector? = null,
     onDetent: () -> Unit = {},
     onActivated: (() -> Unit)? = null,
     enabled: Boolean = true,
@@ -324,19 +326,26 @@ internal fun <T> ReleaseCommitWheel(
             )
         }
 
-        if (label != null) {
+        if (label != null || labelIcon != null) {
             val compactBadge = wheelHeight <= 34.dp
+            val iconBadge = labelIcon != null
             ControlTileCornerBadge(
-                text = label,
+                text = label.orEmpty(),
                 textColor = labelTextColor ?: badgeText,
                 backgroundColor = badgeBackground,
                 borderColor = badgeBorder,
                 borderWidth = 0.5.dp,
                 fontSize = if (compactBadge) 8.sp else 9.sp,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = if (compactBadge) 4.dp else 6.dp,
-                    vertical = 1.dp,
-                ),
+                contentPadding = if (iconBadge) {
+                    androidx.compose.foundation.layout.PaddingValues(if (compactBadge) 1.5.dp else 2.dp)
+                } else {
+                    androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = if (compactBadge) 4.dp else 6.dp,
+                        vertical = 1.dp,
+                    )
+                },
+                icon = labelIcon,
+                iconSize = if (compactBadge) 11.dp else 13.dp,
                 shape = RoundedCornerShape(bottomEnd = if (compactBadge) 4.dp else 5.dp),
                 modifier = Modifier
                     .align(Alignment.TopStart)

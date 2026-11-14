@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -12,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -50,6 +53,8 @@ internal fun ControlTileCornerBadge(
     fontSize: TextUnit = 9.sp,
     borderWidth: Dp = 0.75.dp,
     contentPadding: PaddingValues = PaddingValues(horizontal = 6.dp),
+    icon: ImageVector? = null,
+    iconSize: Dp = 13.dp,
 ) {
     Box(
         modifier = modifier
@@ -58,14 +63,25 @@ internal fun ControlTileCornerBadge(
             .border(borderWidth, borderColor, shape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = text,
-            color = textColor,
-            fontSize = fontSize,
-            lineHeight = (fontSize.value + 1f).sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            modifier = Modifier.padding(contentPadding),
-        )
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = textColor,
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .size(iconSize),
+            )
+        } else {
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = fontSize,
+                lineHeight = (fontSize.value + 1f).sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier.padding(contentPadding),
+            )
+        }
     }
 }
