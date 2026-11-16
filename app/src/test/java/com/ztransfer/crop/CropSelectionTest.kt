@@ -50,6 +50,19 @@ class CropSelectionTest {
         assertEquals(0f, reviewDisplayRotationDegrees(1, null, 1920, 1080))
         assertNull(reviewDisplayRotationDegrees(5, 5, 1920, 1080))
         assertNull(reviewDisplayRotationDegrees(null, null, 1920, 1080))
+        // Preview bytes without a tag report orientation 1. File EXIF 6 must still stand them up.
+        assertEquals(0f, reviewDisplayRotationDegrees(null, 1, 1920, 1080))
+        assertEquals(90f, reviewDisplayRotationDegrees(6, 1, 1920, 1080))
+        assertEquals(-90f, reviewDisplayRotationDegrees(8, 1, 1920, 1080))
+    }
+    @Test fun previewOrientationOneWaitsForTheFileExif() {
+        assertTrue(reviewOrientationSettled(6, exifFinished = false))
+        assertTrue(reviewOrientationSettled(8, exifFinished = false))
+        assertTrue(reviewOrientationSettled(3, exifFinished = false))
+        assertFalse(reviewOrientationSettled(1, exifFinished = false))
+        assertFalse(reviewOrientationSettled(null, exifFinished = false))
+        assertTrue(reviewOrientationSettled(1, exifFinished = true))
+        assertTrue(reviewOrientationSettled(null, exifFinished = true))
     }
     @Test fun returnRotationTakesTheShortArc() {
         assertEquals(0f, nearestRotationDegrees(90f, 0f))

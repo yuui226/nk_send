@@ -51,6 +51,13 @@ internal fun nearestRotationDegrees(from: Float, to: Float): Float {
     return from + delta
 }
 
+/**
+ * Preview JPEG orientation 1 is ambiguous: the tag may be missing and the parser reports
+ * normal. A later file-header EXIF can still turn that bitmap. Tags 2..8 are explicit.
+ */
+internal fun reviewOrientationSettled(embeddedOrientation: Int?, exifFinished: Boolean): Boolean =
+    (embeddedOrientation != null && embeddedOrientation in 2..8) || exifFinished
+
 /** Same orientation decision the crop editor uses, expressed as a preview rotation. */
 internal fun reviewDisplayRotationDegrees(
     sourceOrientation: Int?,

@@ -515,12 +515,13 @@ internal fun PhotoPreviewOverlay(
         return resolvedReviewRotation(file) ?: rotationDegrees
     }
 
-    /** Photo angle is known, or both EXIF and preview loads have finished without one. */
+    /** Photo angle is final, or both EXIF and preview loads have finished without one. */
     fun reviewOrientationReady(file: NikonCamera.FileInfo): Boolean {
         if (review?.followPhotoOrientation != true) return true
-        if (resolvedReviewRotation(file) != null) return true
         val handle = file.handle
         val exifDone = exifFinished[handle] == true
+        if (!com.ztransfer.crop.reviewOrientationSettled(fhdOrientations[handle], exifDone)) return false
+        if (resolvedReviewRotation(file) != null) return true
         val previewDone = fhdUnavailable[handle] == true || highResolutionBitmaps[handle] != null
         return exifDone && previewDone
     }
@@ -1052,6 +1053,29 @@ internal fun PhotoPreviewOverlay(
         }
     }
 
+    // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
+    suspend fun loadExifFile(file: NikonCamera.FileInfo) {
+        val h = file.handle
+        if (exifFinished[h] == true || h in exifData) return
+        if (exifLoading.containsKey(h)) {
+            while (exifLoading.containsKey(h)) delay(16)
+            return
+        }
+        exifFinished.remove(h)
+        exifLoading[h] = true
+        try {
+            exifData[h] = cameraViewModel.loadExif(file)
+            exifFinished[h] = true
+        } finally {
+            exifLoading.remove(h)
+        }
+    }
+
+    suspend fun loadExifPage(page: Int) {
+        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file ?: return
+        loadExifFile(file)
+    }
+
     LaunchedEffect(items, review?.followRevision, review?.followLatest) {
         if (review == null) return@LaunchedEffect
         val follow = review.followRevision != appliedFollowRevision
@@ -1063,6 +1087,17 @@ internal fun PhotoPreviewOverlay(
                     cameraViewModel.withInteractivePreviewPriority {
                         loadHighResolutionPage(0, awaitExisting = true,
                             allowCameraRequest = cameraState.isConnectedToCamera, targetFile = target)
+                        // A preview JPEG often has no orientation tag, so a portrait frame is
+                        // still landscape pixels. Reveal only after that angle can no longer change.
+                        if (review.followPhotoOrientation &&
+                            target.extension !in VIDEO_EXTENSIONS &&
+                            !com.ztransfer.crop.reviewOrientationSettled(
+                                fhdOrientations[target.handle],
+                                exifFinished[target.handle] == true,
+                            )
+                        ) {
+                            loadExifFile(target)
+                        }
                     }
                 }
                 // Keep the current photo and gestures until the incoming image is decoded.
@@ -1085,22 +1120,6 @@ internal fun PhotoPreviewOverlay(
             pendingFollowHandle = null
             followingLatest = false
             followVisibility.snapTo(1f)
-        }
-    }
-
-    // 加载单页 EXIF（仅当前页，不预加载邻居——EXIF 只在当前页底栏显示，预加载纯浪费通道）。
-    suspend fun loadExifPage(page: Int) {
-        val file = (previewItems.getOrNull(page) as? PhotoPreviewItem.Photo)?.file
-            ?: return
-        val h = file.handle
-        if (h in exifData || exifLoading.containsKey(h)) return
-        exifFinished.remove(h)
-        exifLoading[h] = true
-        try {
-            exifData[h] = cameraViewModel.loadExif(file)
-            exifFinished[h] = true
-        } finally {
-            exifLoading.remove(h)
         }
     }
 
