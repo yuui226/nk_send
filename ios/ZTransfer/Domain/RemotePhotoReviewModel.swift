@@ -69,6 +69,7 @@ final class RemotePhotoReviewModel: ObservableObject {
     @Published private(set) var active = false
     @Published private(set) var loading = false
     @Published private(set) var failed = false
+    @Published private(set) var followPhotoOrientation: Bool
     @Published private(set) var followLatest: Bool
     @Published private(set) var followRevision = 0
     @Published private(set) var photos: [RemoteReviewPhoto] = [] {
@@ -115,6 +116,13 @@ final class RemotePhotoReviewModel: ObservableObject {
         self.onActiveChanged = onActiveChanged
         self.defaults = defaults
         followLatest = defaults.bool(forKey: "remote_review_follow_latest")
+        followPhotoOrientation = defaults.bool(forKey: "remote_review_match_orientation")
+    }
+
+    func setFollowPhotoOrientation(_ enabled: Bool) {
+        guard followPhotoOrientation != enabled else { return }
+        followPhotoOrientation = enabled
+        defaults.set(enabled, forKey: "remote_review_match_orientation")
     }
 
     func setFollowLatest(_ enabled: Bool) {

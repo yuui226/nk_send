@@ -449,15 +449,18 @@ private struct TipGuideSectionView: View {
         }
     }
 }
-private struct TipGuideRevealLayout: Layout {
+struct TipGuideRevealLayout: Layout {
     var progress: CGFloat
+    var fromBottom = false
     var animatableData: CGFloat { get { progress } set { progress = newValue } }
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let natural = subviews.first?.sizeThatFits(.init(width: proposal.width, height: nil)) ?? .zero
         return CGSize(width: natural.width, height: natural.height * max(0, min(1, progress)))
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: .init(width: bounds.width, height: nil))
+        let natural = subviews.first?.sizeThatFits(.init(width: bounds.width, height: nil)) ?? .zero
+        let origin = CGPoint(x: bounds.minX, y: fromBottom ? bounds.maxY - natural.height : bounds.minY)
+        subviews.first?.place(at: origin, anchor: .topLeading, proposal: .init(width: bounds.width, height: nil))
     }
 }
 private struct TipGuideToolMark: View {
@@ -513,6 +516,7 @@ enum TipGuides {
     static func settings(showEffects: Bool, isPro: Bool, showManagement: Bool,
                          managementTitleKey: String = "iap_manage") -> [TipGuideSection] {
         var sections = [TipGuideSection(id: "settings_help_transfer", items: [
+            .init(textKey: "settings_help_camera_settings_faster"),
             item("transfer_save_destination", "transfer_save_destination_summary"),
             item("transfer_directory", "settings_help_directory"), item("storage_mode", "storage_mode_summary"),
             item("auto_transfer_new_media", "auto_transfer_new_media_summary"), item("defer_transfer_start", "defer_transfer_start_summary")]),

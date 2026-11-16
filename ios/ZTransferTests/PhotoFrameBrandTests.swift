@@ -372,7 +372,7 @@ final class PhotoFrameBrandTests: XCTestCase {
     func testKnownBrandTextKeepsModel() {
         let value = metadata(make: "Nikon Corporation", model: "Z 8")
         XCTAssertEqual(value.normalizedMake, "Nikon")
-        XCTAssertEqual(value.normalizedModel, "Z 8")
+        XCTAssertEqual(value.normalizedModel, "Z8")
     }
 
     func testUnknownMakeRemainsText() {
@@ -814,7 +814,7 @@ final class PhotoFrameBrandTests: XCTestCase {
 
     func testPlaqueIdentityUsesRawLabelsAndAndroidFallbackOrder() {
         let cases: [(String?, String?, String?, String?, String?)] = [
-            (" Nikon Corporation ", " NIKON Z 8 ", " Lens ", "NIKON CORPORATION", "NIKON Z 8 · Lens"),
+            (" Nikon Corporation ", " NIKON Z 8 ", " Lens ", "NIKON CORPORATION", "Z8 · Lens"),
             ("sony", "SoNy", "Lens", "SONY", "Lens"),
             (nil, "Model", "Lens", "Model", "Lens"),
             (nil, "Lens", "Lens", "Lens", nil),

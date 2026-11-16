@@ -36,7 +36,10 @@ struct ConnectionState: Equatable, Sendable {
     var rememberedPresentationMode: CameraPresentationMode?
     var usbPhase: USBConnectionPhase = .waitingForCamera
     var staProgressIP: String?
-    var wifiPhase: WiFiConnectionPhase = .idle
+    var staPromptCameraOk = false
+    var wifiPhase: WiFiConnectionPhase = .idle {
+        didSet { if wifiPhase != .pairing { staPromptCameraOk = false } }
+    }
     var wifiFailureKind: WiFiFailureKind?
     var usbAuthorization: USBAuthorizationState = .notDetermined
     var discoveredDevices: [USBDeviceDescriptor] = []

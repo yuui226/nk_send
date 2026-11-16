@@ -111,6 +111,7 @@ struct RemotePhotoReviewView: View {
     @State private var selected: CameraFile?
     @State private var previewProjection = PhotoPreviewProjectionCache()
     @State private var hintVisible = false
+    @State private var hintKey = "remote_review_follow_on"
     @State private var hintTask: Task<Void, Never>?
     @StateObject private var dismissal: RemoteReviewDismissal
     @AppStorage("skin_preset") private var skinPreset = ZTransferButtonSkin.defaultPreset.rawValue
@@ -160,7 +161,7 @@ struct RemotePhotoReviewView: View {
             .padding(.top, 8).padding(.trailing, landscape ? 4 : 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             if hintVisible {
-                Text(AppLocalized.resource("remote_review_follow_on"))
+                Text(AppLocalized.resource(hintKey))
                     .zTransferTypography(.labelLarge)
                     .foregroundStyle(ZTransferColors.primaryText)
                     .lineLimit(1)
@@ -177,18 +178,10 @@ struct RemotePhotoReviewView: View {
             .padding(contentInsets)
             .allowsHitTesting(!dismissal.closing)
             .onChange(of: model.followLatest) { enabled in
-                hintTask?.cancel()
-                withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)) {
-                    hintVisible = enabled
-                }
-                guard enabled else { return }
-                hintTask = Task {
-                    try? await Task.sleep(for: .milliseconds(1800))
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)) {
-                        hintVisible = false
-                    }
-                }
+                showHint(enabled, key: "remote_review_follow_on")
+            }
+            .onChange(of: model.followPhotoOrientation) { enabled in
+                showHint(enabled, key: "remote_review_match_orientation_on")
             }
             .onDisappear { hintTask?.cancel() }
         }
@@ -200,6 +193,18 @@ struct RemotePhotoReviewView: View {
         .onAppear { selected = model.photos.first?.file }
         .onDisappear { dismissal.cancel() }
     }
+    private func showHint(_ enabled: Bool, key: String) {
+        hintTask?.cancel()
+        hintKey = key
+        withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)) { hintVisible = enabled }
+        guard enabled else { return }
+        hintTask = Task {
+            try? await Task.sleep(for: .milliseconds(1800))
+            guard !Task.isCancelled else { return }
+            withAnimation(.interpolatingSpring(mass: 1, stiffness: 400, damping: 40)) { hintVisible = false }
+        }
+    }
+
 }
 
 /// Material3 TextButton: shared by empty-catalog and per-page retry. The
@@ -216,5 +221,33 @@ struct RemoteReviewRetryButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(!connected)
+    }
+}
+
+/// Android ReviewPhotoOrientationMark: 200° start, -292° arc, centered auto.
+struct ReviewPhotoOrientationMark: View {
+    var body: some View {
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            ZStack {
+                Canvas { context, size in
+                    let stroke = side * 0.078, radius = side * 0.40
+                    let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                    var arc = Path()
+                    arc.addArc(center: center, radius: radius, startAngle: .degrees(200), endAngle: .degrees(-92), clockwise: true)
+                    context.stroke(arc, with: .foreground, style: StrokeStyle(lineWidth: stroke, lineCap: .round))
+                    let angle = -92.0 * Double.pi / 180
+                    let tip = CGPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+                    let dx = sin(angle), dy = -cos(angle), head = stroke * 2.2
+                    var arrow = Path()
+                    arrow.move(to: CGPoint(x: tip.x + dx * head * 0.72, y: tip.y + dy * head * 0.72))
+                    arrow.addLine(to: CGPoint(x: tip.x - dx * head * 0.22 - dy * head * 0.78, y: tip.y - dy * head * 0.22 + dx * head * 0.78))
+                    arrow.addLine(to: CGPoint(x: tip.x - dx * head * 0.22 + dy * head * 0.78, y: tip.y - dy * head * 0.22 - dx * head * 0.78))
+                    arrow.closeSubpath()
+                    context.fill(arrow, with: .foreground)
+                }
+                Text(verbatim: "auto").font(.system(size: side * 0.30, weight: .bold)).tracking(-0.2).lineLimit(1)
+            }
+        }
     }
 }

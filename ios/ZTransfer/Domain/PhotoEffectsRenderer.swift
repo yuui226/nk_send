@@ -1441,7 +1441,7 @@ enum PhotoEffectsRenderer {
             value?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         }
         let brand = cleaned(metadata.make)?.uppercased()
-        let model = cleaned(metadata.model)
+        let model = metadata.normalizedModel.nilIfEmpty
         let lens = cleaned(metadata.lensModel)
         let primary = brand ?? model ?? lens
         let secondaryModel = model.flatMap { value in
@@ -2376,7 +2376,7 @@ extension PhotoFrameMetadata {
         }
         let example = preview ? photoFramePreviewPlace(locale: locale) : nil
         let sourceMake = cleaned(make)
-        let sourceModel = cleaned(model)
+        let sourceModel = cleaned(model).map(formatCameraGenerationLabel)
         let sourceLens = cleaned(lensModel)
         let inferredBrand = cameraBrandLabel(make: make, model: model).nilIfEmpty
         let modelValue = normalizedModel.nilIfEmpty
@@ -2488,11 +2488,13 @@ extension PhotoFrameMetadata {
         let value = model?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !value.isEmpty else { return "" }
         let prefixes = [make, normalizedMake].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.sorted { $0.count > $1.count }
+        var stripped = value
         if let prefix = prefixes.first(where: { value.range(of: "^\(NSRegularExpression.escapedPattern(for: $0))", options: [.regularExpression, .caseInsensitive]) != nil }) {
-            return String(value.dropFirst(prefix.count)).trimmingCharacters(in: CharacterSet(charactersIn: " -_"))
+            stripped = String(value.dropFirst(prefix.count).drop(while: { " -_".contains($0) }))
         }
-        return value
+        return formatCameraGenerationLabel(stripped).replacingOccurrences(of: " ", with: "")
     }
+
     func cameraBrandLabel(make: String?, model: String?) -> String {
         let normalized = PhotoFrameMetadata(
             make: make, model: nil, lensModel: nil, focalLength: nil,
@@ -2621,4 +2623,12 @@ private extension String {
 private extension PhotoFrameWatermark {
     func withPosition(_ value: PhotoFrameWatermarkPosition) -> Self { var copy = self; copy.position = value; return copy }
     func copy(enabled: Bool) -> Self { var copy = self; copy.enabled = enabled; return copy }
+}
+
+/// Android PhotoFrameExporter: only a terminal _2…_12 generation is rewritten.
+func formatCameraGenerationLabel(_ model: String) -> String {
+    guard let range = model.range(of: #"_[0-9]{1,2}$"#, options: .regularExpression),
+          let generation = Int(model[range].dropFirst()), (2...12).contains(generation) else { return model }
+    let romans = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII"]
+    return String(model[..<range.lowerBound]) + romans[generation - 1]
 }

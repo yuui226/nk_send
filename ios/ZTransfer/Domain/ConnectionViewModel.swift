@@ -408,7 +408,11 @@ final class ConnectionViewModel: ObservableObject {
         case .discovering(let ip):
             if state.wifiPhase != .pairing { state.wifiPhase = .discovering }
             state.staProgressIP = ip
-        case .pairing: state.wifiPhase = .pairing
+        case .pairing:
+            state.staPromptCameraOk = false
+            state.wifiPhase = .pairing
+        case .pairingAcknowledged:
+            if state.wifiPhase == .pairing { state.staPromptCameraOk = true }
         case .connecting: if state.wifiPhase != .pairing { state.wifiPhase = .connecting }
         }
     }

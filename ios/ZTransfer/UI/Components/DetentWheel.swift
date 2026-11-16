@@ -17,6 +17,7 @@ struct DetentWheel<Option: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.isEnabled) private var parentEnabled
     let label: String
+    let labelIcon: String?
     let options: [Option]
     let selected: Option
     let optionLabel: (Option) -> String
@@ -61,7 +62,7 @@ struct DetentWheel<Option: Hashable>: View {
     let selectedIndex: Int
     private let gestureConfiguration: DetentWheelConfiguration<Option>
 
-    init(label: String, options: [Option], selected: Option,
+    init(label: String, labelIcon: String? = nil, options: [Option], selected: Option,
          optionLabel: @escaping (Option) -> String,
          onCommit: @escaping (Option) -> Void,
          sizing: DetentWheelSizing? = nil,
@@ -85,7 +86,7 @@ struct DetentWheel<Option: Hashable>: View {
          contentAnchorSpace: AnyHashable? = nil,
          onContentAnchorChange: ((CGRect) -> Void)? = nil) {
         precondition(!options.isEmpty, "DetentWheel requires at least one option")
-        self.label = label; self.options = options; self.selected = selected
+        self.label = label; self.labelIcon = labelIcon; self.options = options; self.selected = selected
         self.optionLabel = optionLabel; self.onCommit = onCommit
         let resolvedRowHeight = sizing?.rowHeight ?? rowHeight
         self.rowHeight = resolvedRowHeight; self.wheelHeight = sizing?.height ?? wheelHeight
@@ -155,14 +156,20 @@ struct DetentWheel<Option: Hashable>: View {
                         .fill(ambientEffectColor.opacity(ambientEffectAlpha)).allowsHitTesting(false)
                 }
                 wheelRows(center: center)
-                if !label.isEmpty {
+                if !label.isEmpty || labelIcon != nil {
                     // Android ReleaseCommitWheel uses a smaller badge at <=34dp.
-                    Text(label)
+                    Group {
+                        if let labelIcon {
+                            Image(systemName: labelIcon).resizable().scaledToFit()
+                                .frame(width: wheelHeight <= 34 ? 11 : 13, height: wheelHeight <= 34 ? 11 : 13)
+                                .accessibilityHidden(true)
+                        } else { Text(label) }
+                    }
                         .font(.system(size: wheelHeight <= 34 ? 8 : 9, weight: .medium))
                         .lineLimit(1)
                         .foregroundStyle(badgeColor)
-                        .padding(.horizontal, wheelHeight <= 34 ? 4 : 6)
-                        .padding(.vertical, 1)
+                        .padding(.horizontal, labelIcon != nil ? (wheelHeight <= 34 ? 1.5 : 2) : (wheelHeight <= 34 ? 4 : 6))
+                        .padding(.vertical, labelIcon != nil ? (wheelHeight <= 34 ? 1.5 : 2) : 1)
                         .frame(minHeight: wheelHeight <= 34 ? 11 : 15)
                         .background(badgeColor.opacity(0.10), in: UnevenRoundedRectangle(bottomTrailingRadius: wheelHeight <= 34 ? 4 : 5))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

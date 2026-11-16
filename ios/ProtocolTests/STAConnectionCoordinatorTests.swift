@@ -176,7 +176,7 @@ final class STAConnectionCoordinatorTests: XCTestCase {
         let attempts = await expected.values, progress = await stages.values, failure = await coordinator.lastFailure
         XCTAssertEqual(camera.guid, new)
         XCTAssertEqual(attempts, [old, old, old, nil, new])
-        XCTAssertEqual(progress, [.pairing])
+        XCTAssertEqual(progress, [.pairing, .pairingAcknowledged])
         XCTAssertNil(failure)
         XCTAssertTrue(store.hasTrustedPairing(old))
         XCTAssertTrue(store.hasTrustedPairing(new))

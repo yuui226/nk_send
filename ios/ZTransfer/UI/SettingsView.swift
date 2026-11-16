@@ -653,7 +653,7 @@ struct SettingsView: View {
                     default: return AppLocalized.resource("theme_system")
                     }
                 }, onCommit: { themeMode = $0 }, rowHeight: 16, wheelHeight: 42, optionFontSize: 13).frame(maxWidth: .infinity)
-                DetentWheel(label: AppLocalized.resource("language"), options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
+                DetentWheel(label: AppLocalized.resource("language"), labelIcon: "globe", options: ["system", "en", "zh-Hans", "zh-Hant"], selected: appLanguage, optionLabel: { language in
                     switch language {
                     case "en": return "English"
                     case "zh-Hans": return AppLocalized.text("简体中文")

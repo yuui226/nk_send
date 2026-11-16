@@ -6,6 +6,89 @@ import UIKit
 
 final class ConnectionStateTests: XCTestCase {
     @MainActor
+    func testHotspotQuestionIsInlineAndRoutesOnlyToExpansion() async throws {
+        var toggles = 0
+        let host = UIHostingController(rootView: STAHotspotHelpLine(expanded: false) { toggles += 1 }.frame(width: 210))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 240, height: 200)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await Task.sleep(for: .milliseconds(100))
+        host.view.layoutIfNeeded()
+        func find(_ view: UIView) -> UITextView? {
+            if let text = view as? UITextView { return text }
+            return view.subviews.lazy.compactMap { find($0) }.first
+        }
+        let view = try XCTUnwrap(find(host.view))
+        XCTAssertFalse(view.isEditable)
+        XCTAssertFalse(view.isScrollEnabled)
+        XCTAssertLessThanOrEqual(view.bounds.width, 210.5)
+        let content = try XCTUnwrap(view.attributedText)
+        var links: [(URL, NSRange)] = []
+        content.enumerateAttribute(.link, in: NSRange(location: 0, length: content.length)) { value, range, _ in
+            if let url = value as? URL { links.append((url, range)) }
+            else if let string = value as? String, let url = URL(string: string) { links.append((url, range)) }
+        }
+        XCTAssertEqual(links.count, 1)
+        let link = try XCTUnwrap(links.first)
+        XCTAssertEqual(link.1.length, 1)
+        let allowed = view.delegate?.textView?(view, shouldInteractWith: link.0, in: link.1, interaction: .invokeDefaultAction)
+        XCTAssertEqual(allowed, false)
+        XCTAssertEqual(toggles, 1)
+        let image = UIGraphicsImageRenderer(bounds: host.view.bounds).image { host.view.layer.render(in: $0.cgContext) }
+        try image.pngData()?.write(to: URL(fileURLWithPath: "/tmp/ztransfer-hotspot-inline-20261116.png"))
+    }
+
+    func testCameraOKReminderOnlyChangesPairingLabelAndClearsOnExit() {
+        XCTAssertEqual(STAConnectButtonState(.pairing), .pairing)
+        XCTAssertEqual(STAConnectButtonState(.pairing, promptCameraOk: true), .pressOK)
+        XCTAssertEqual(STAConnectButtonState.pressOK.rawValue, STAConnectButtonState.pairing.rawValue + 1)
+        for phase: WiFiConnectionPhase in [.idle, .discovering, .connecting, .connected, .failed("failure")] {
+            XCTAssertEqual(STAConnectButtonState(phase, promptCameraOk: true), STAConnectButtonState(phase))
+            var state = ConnectionState()
+            state.wifiPhase = .pairing
+            state.staPromptCameraOk = true
+            state.wifiPhase = phase
+            XCTAssertFalse(state.staPromptCameraOk)
+        }
+    }
+
+    @MainActor
+    func testPairingACKSurvivesReconnectProgressButNotCancellationOrLateCallbacks() async throws {
+        let service = STAACKReplayService()
+        let model = ConnectionViewModel(discoverySource: WorkspaceDiscoverySource(devices: []), wifiService: service)
+        model.select(wirelessMode: .sta)
+        let attempt = Task { await model.connectSelectedWiFi() }
+        defer { model.cancelWiFiConnection() }
+        for _ in 0..<100 {
+            if await service.ready { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        await service.send(.pairingAcknowledged)
+        XCTAssertFalse(model.state.staPromptCameraOk, "ACK outside pairing is ignored")
+        await service.send(.pairing)
+        XCTAssertFalse(model.state.staPromptCameraOk)
+        await service.send(.pairingAcknowledged)
+        XCTAssertTrue(model.state.staPromptCameraOk)
+        await service.send(.connecting)
+        await service.send(.discovering("192.168.1.2"))
+        XCTAssertEqual(model.state.wifiPhase, .pairing)
+        XCTAssertTrue(model.state.staPromptCameraOk)
+        await service.send(.pairing)
+        XCTAssertFalse(model.state.staPromptCameraOk, "A new pairing exchange clears the reminder")
+        await service.send(.pairingAcknowledged)
+        model.cancelWiFiConnection()
+        XCTAssertFalse(model.state.staPromptCameraOk)
+        await service.send(.pairing)
+        await service.send(.pairingAcknowledged)
+        XCTAssertEqual(model.state.wifiPhase, .idle)
+        XCTAssertFalse(model.state.staPromptCameraOk)
+        await attempt.value
+    }
+
+    @MainActor
     func testDisconnectedSTATapAcknowledgesActiveDiscoveryWithoutStartingAnotherAttempt() async throws {
         let preferences = UserDefaults(suiteName: "sta_connection")!
         let keys = ["wireless_mode", CameraPresentationMode.preferenceKey]
@@ -728,6 +811,25 @@ private actor STARejectedReplayService: WiFiConnectionServicing {
         attempts += 1
         await onStage(.pairing)
         throw STAConnectionFailure(cause: STAPairingConfirmationMissing(cause: PTPSessionError.responseCode(0x201F)), knownCamera: true)
+    }
+    func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async {}
+    func disconnect() async {}
+}
+
+private actor STAACKReplayService: WiFiConnectionServicing {
+    nonisolated let profiles: STAProfileStore
+    private var callback: (@Sendable (STAConnectionStage) async -> Void)?
+    var ready: Bool { callback != nil }
+    init() {
+        let name = "STAACK-\(UUID())"
+        profiles = STAProfileStore(preferences: UserDefaults(suiteName: name)!, pairing: UserDefaults(suiteName: name + ".pairing")!)
+    }
+    func send(_ stage: STAConnectionStage) async { await callback?(stage) }
+    func connectAP(host: String) async throws -> CameraRepository { throw STAConnectionError.notFound }
+    func connectSTA(discovery: PTPIPDiscoveryService, onStage: @escaping @Sendable (STAConnectionStage) async -> Void) async throws -> CameraRepository {
+        callback = onStage
+        try await Task.sleep(for: .seconds(30))
+        throw CancellationError()
     }
     func startKeepalive(for repository: CameraRepository, onLost: @escaping @Sendable () async -> Void) async {}
     func disconnect() async {}

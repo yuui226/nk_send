@@ -4,12 +4,12 @@ import UIKit
 /// Android HomeScreen.StaConnectButtonState. Error detail changes keep the same
 /// idle action instead of restarting its transition; cancellation rolls back.
 enum STAConnectButtonState: Int {
-    case idle, searching, pairing, connecting, connected
+    case idle, searching, pairing, pressOK, connecting, connected
 
-    init(_ phase: WiFiConnectionPhase) {
+    init(_ phase: WiFiConnectionPhase, promptCameraOk: Bool = false) {
         switch phase {
         case .discovering: self = .searching
-        case .pairing: self = .pairing
+        case .pairing: self = promptCameraOk ? .pressOK : .pairing
         case .connecting: self = .connecting
         case .connected: self = .connected
         case .idle, .unavailable, .reconnecting, .failed: self = .idle
@@ -21,6 +21,7 @@ enum STAConnectButtonState: Int {
         case .idle: AppLocalized.resource("sta_connect_action")
         case .searching: AppLocalized.resource("sta_status_searching")
         case .pairing: AppLocalized.resource("sta_status_pairing")
+        case .pressOK: AppLocalized.resource("sta_status_press_ok")
         case .connecting: AppLocalized.resource("sta_status_connecting")
         case .connected: AppLocalized.resource("sta_status_connected")
         }
@@ -451,7 +452,7 @@ struct ConnectionMethodCard: View {
             .foregroundStyle(tint).frame(width: size, height: size)
     }
 
-    private var staButtonState: STAConnectButtonState { .init(state.wifiPhase) }
+    private var staButtonState: STAConnectButtonState { .init(state.wifiPhase, promptCameraOk: state.staPromptCameraOk) }
     private var usbFeedback: (title: String, message: String)? {
         guard mode == .usb, case let .failed(message) = state.usbPhase else { return nil }
         return (AppLocalized.resource("connection_failed_short"), message)

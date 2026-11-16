@@ -3,6 +3,17 @@ import UIKit
 @testable import ZTransfer
 
 final class PhotoFrameMetadataSettingsTests: XCTestCase {
+    func testCameraGenerationAndCompactModelMatchAndroid() {
+        for (raw, expected) in [("z50_2", "z50II"), ("Z 6_3", "Z 6III"), ("z8_4", "z8IV"), ("x_12", "xXII"), ("x_1", "x_1"), ("x_13", "x_13"), ("x_123", "x_123"), ("x_2a", "x_2a")] {
+            XCTAssertEqual(formatCameraGenerationLabel(raw), expected)
+        }
+        for (make, model, expected) in [("NIKON CORPORATION", "NIKON Z 50_2", "Z50II"), ("NIKON", "NIKON Z f", "Zf"), ("Canon", "Canon EOS R5", "EOSR5"), ("Hasselblad", "Hasselblad X2D 100C", "X2D100C")] {
+            let value = PhotoFrameMetadata(make: make, model: model, lensModel: nil, focalLength: nil, aperture: nil, shutter: nil, iso: nil, exposureCompensation: nil, dateTime: nil)
+            XCTAssertEqual(value.normalizedModel, expected)
+            XCTAssertEqual(PhotoEffectsRenderer.plaqueIdentityLabels(value).secondary, expected)
+        }
+    }
+
     func testWidthUsesAndroidBoundsAndFivePercentSteps() {
         XCTAssertEqual(normalizePhotoFrameWidthPercent(59), 60)
         XCTAssertEqual(normalizePhotoFrameWidthPercent(61), 60)

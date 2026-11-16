@@ -1,6 +1,6 @@
 import Foundation
 
-enum STAConnectionStage: Equatable, Sendable { case discovering(String?), pairing, connecting }
+enum STAConnectionStage: Equatable, Sendable { case discovering(String?), pairing, pairingAcknowledged, connecting }
 
 enum STAConnectionError: Error, Equatable, Sendable {
     case cameraRefused

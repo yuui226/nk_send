@@ -113,3 +113,30 @@ func transformCropBounds(_ bounds: CropBounds, orientation: Int, inverse: Bool =
     let b = inverse ? space.toSource(bounds.right, bounds.bottom) : space.toDisplay(bounds.right, bounds.bottom)
     return CropBounds(left: min(a.x,b.x), top: min(a.y,b.y), right: max(a.x,b.x), bottom: max(a.y,b.y))
 }
+
+// Android CropPreviewBounds: mirrored EXIF cannot be represented by an angle.
+func previewDegreesForExifOrientation(_ orientation: Int) -> Double? {
+    switch orientation {
+    case 1: return 0
+    case 3: return 180
+    case 6: return 90
+    case 8: return -90
+    default: return nil
+    }
+}
+
+func nearestRotationDegrees(from: Double, to: Double) -> Double {
+    let delta = ((to - from + 540).truncatingRemainder(dividingBy: 360) + 360)
+        .truncatingRemainder(dividingBy: 360) - 180
+    return from + delta
+}
+
+// An embedded 1 can mean no tag; wait for the file EXIF before revealing it.
+func reviewOrientationSettled(embeddedOrientation: Int?, exifFinished: Bool) -> Bool {
+    embeddedOrientation.map { (2...8).contains($0) } == true || exifFinished
+}
+
+func reviewDisplayRotationDegrees(sourceOrientation: Int?, embeddedOrientation: Int?, width: Int, height: Int) -> Double? {
+    guard width > 0, height > 0, let source = sourceOrientation ?? embeddedOrientation else { return nil }
+    return previewDegreesForExifOrientation(cropPreviewOrientation(source: source, embedded: embeddedOrientation, width: width, height: height))
+}

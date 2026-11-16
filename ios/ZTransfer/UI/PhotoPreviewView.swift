@@ -445,6 +445,7 @@ struct PhotoPreviewView: View {
     @State private var fhdUnavailable: Set<UInt32> = []
     @State private var exifByFile: [UInt32: PhotoExif] = [:]
     @State private var exifFinished: Set<UInt32> = []
+    @State private var exifLoadingIDs: Set<UInt32> = []
     @State private var deferredLoadsEnabled = false
     @State private var previousTransfersBusy = false
     @State private var neighborPrefetchTask: Task<Void, Never>?
@@ -572,7 +573,9 @@ struct PhotoPreviewView: View {
                                 PreviewImage(session: session, file: file,
                                              highResolutionImage: highResolutionImages[file.id],
                                              initialThumbnail: file.id == openingSource.file?.id ? openingSource.thumbnail : nil,
-                                             rotationDegrees: rotationDegrees,
+                                             rotationDegrees: reviewRotation(for: file),
+                                             matchPhotoOrientation: review?.followPhotoOrientation == true,
+                                             holdForOrientation: review?.followPhotoOrientation == true && !isVideo(file) && !reviewOrientationReady(file),
                                              infoBottom: landscapeReview ? nil : previewSafeInsets.top + ((currentPhoto.map { burstIDByFile[$0.id] != nil || $0.isProtected } ?? false) ? 112 : 70),
                                              interactive: !followingLatest && !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy && queueDragDirection != .upward,
                                              pinchEnabled: !followingLatest && !closing && effectsFile == nil && !cropPresented && !cropRestoring && !queueFlightActive && !burstTransitionBusy,
@@ -1013,6 +1016,38 @@ struct PhotoPreviewView: View {
         }
     }
 
+    private func resolvedReviewRotation(_ file: CameraFile) -> Double? {
+        guard let image = highResolutionImages[file.id] ?? displayedImages[file.id] ?? session.memoryThumbnailImage(file: file) else { return nil }
+        return reviewDisplayRotationDegrees(sourceOrientation: exifByFile[file.id]?.orientation,
+            embeddedOrientation: fhdOrientations[file.id], width: Int(image.size.width), height: Int(image.size.height))
+    }
+
+    private func reviewRotation(for file: CameraFile) -> Double {
+        review?.followPhotoOrientation == true ? (resolvedReviewRotation(file) ?? rotationDegrees) : rotationDegrees
+    }
+
+    private func reviewOrientationReady(_ file: CameraFile) -> Bool {
+        guard review?.followPhotoOrientation == true else { return true }
+        let done = exifFinished.contains(file.id)
+        guard reviewOrientationSettled(embeddedOrientation: fhdOrientations[file.id], exifFinished: done) else { return false }
+        return resolvedReviewRotation(file) != nil || (done && (fhdUnavailable.contains(file.id) || highResolutionImages[file.id] != nil))
+    }
+
+    /// The caller already holds the interactive reservation shared with the preview read.
+    @MainActor
+    private func loadReviewOrientation(_ file: CameraFile) async {
+        while exifLoadingIDs.contains(file.id) {
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+        }
+        guard !Task.isCancelled, !exifFinished.contains(file.id), exifByFile[file.id] == nil else { return }
+        exifLoadingIDs.insert(file.id)
+        defer { exifLoadingIDs.remove(file.id) }
+        let metadata: PhotoExif?
+        do { metadata = try await session.exif(file: file) } catch { return }
+        guard !Task.isCancelled, previewKeepIDs().contains(file.id) else { return }
+        finishRemoteExifLoad(file: file, metadata: metadata, loadedExif: true)
+    }
+
     /// Old photo exits right over 100ms; the decoded newest photo then enters from the left over 220ms.
     /// A newer photo supersedes an in-flight transition; the older task must not write back over it.
     private func consumeReviewFollow() async {
@@ -1042,8 +1077,16 @@ struct PhotoPreviewView: View {
                 withTransaction(transaction) { followVisibility = 1 }
             }
         }
-        _ = await loadHighResolution(file: target, awaitExisting: true,
-                                     allowCameraRequest: isSessionConnected, interactivePriority: true)
+        // Android reads the incoming preview and, when needed, its EXIF inside one
+        // interactive reservation, then reveals the photo only after that angle is final.
+        _ = try? await session.withInteractivePreviewPriority { @MainActor in
+            _ = await loadHighResolution(file: target, awaitExisting: true,
+                                         allowCameraRequest: isSessionConnected, interactivePriority: false)
+            if review.followPhotoOrientation && !isVideo(target) &&
+                !reviewOrientationSettled(embeddedOrientation: fhdOrientations[target.id], exifFinished: exifFinished.contains(target.id)) {
+                await loadReviewOrientation(target)
+            }
+        }
         guard followEpoch == epoch, !Task.isCancelled else { return }
         guard highResolutionImages[target.id] != nil else { return }
         guard review.followRevision == revision else { return }
@@ -1105,6 +1148,7 @@ struct PhotoPreviewView: View {
             isReview: review != nil,
             landscapeReview: landscapeReview,
             followLatest: review?.followLatest == true,
+            followPhotoOrientation: review?.followPhotoOrientation == true,
             effectsAvailable: effectsStore != nil && effectsDirectory != nil,
             effectsEnabled: effectsStore?.isEnabled == true,
             histogramMode: histogramMode,
@@ -1112,7 +1156,7 @@ struct PhotoPreviewView: View {
             inputsEnabled: inputsEnabled,
             editEnabled: editEnabled,
             collapseEnabled: collapseEnabled,
-            rotationEnabled: !burstTransitionBusy,
+            rotationEnabled: !burstTransitionBusy && review?.followPhotoOrientation != true,
             onCollapse: { collapseCurrentBurst() },
             onEffects: { file in
                 ZTransferHaptics.shared.play(.navigation)
@@ -1135,7 +1179,8 @@ struct PhotoPreviewView: View {
                 withAnimation(photoPreviewRotationAnimation) { rotationDegrees -= 90 }
                 rotationQuarterTurns = ((Int(-rotationDegrees / 90) % 4) + 4) % 4
             },
-            onFollow: { review?.setFollowLatest(!(review?.followLatest == true)) }
+            onFollow: { review?.setFollowLatest(!(review?.followLatest == true)) },
+            onOrientation: { review?.setFollowPhotoOrientation(!(review?.followPhotoOrientation == true)) }
         )
         .compositingGroup()
         .modifier(PhotoPreviewPresentationOpacity(clock: presentation, factor: burstPagerAlpha * (cropPresented ? 0 : 1)))
@@ -1319,7 +1364,12 @@ struct PhotoPreviewView: View {
         }
         guard !Task.isCancelled else { return }
         let needsPreview = !isVideo(file) && highResolutionImages[file.id] == nil
+        while exifLoadingIDs.contains(file.id) {
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+        }
         let needsExif = !exifFinished.contains(file.id)
+        if needsExif { exifLoadingIDs.insert(file.id) }
+        defer { if needsExif { exifLoadingIDs.remove(file.id) } }
         if needsPreview {
             fhdUnavailable.remove(file.id)
             highResolutionLoading.insert(file.id)
@@ -2044,6 +2094,7 @@ struct PhotoPreviewTools: View {
     let isReview: Bool
     var landscapeReview = false
     var followLatest = false
+    var followPhotoOrientation = false
     let effectsAvailable: Bool
     let effectsEnabled: Bool
     let histogramMode: RemoteHistogramMode
@@ -2058,6 +2109,7 @@ struct PhotoPreviewTools: View {
     let onHistogram: () -> Void
     let onRotate: () -> Void
     var onFollow: () -> Void = {}
+    var onOrientation: () -> Void = {}
     @State private var retained: PhotoPreviewToolSelection?
 
     private func accepts(_ file: CameraFile) -> Bool {
@@ -2104,22 +2156,36 @@ struct PhotoPreviewTools: View {
                                     Button(action: onFollow) {
                                         Text(verbatim: "NEW")
                                             .zTransferTypography(.labelSmall, weight: .bold)
-                                            .foregroundStyle(ZTransferColors.accentBlue)
+                                            .foregroundStyle(followLatest ? ZTransferColors.accentYellow : ZTransferColors.accentBlue)
                                             .lineLimit(1)
                                             .frame(width: metrics.size, height: metrics.size)
                                     }
                                     .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: metrics.size / 2,
-                                        active: followLatest, activeColor: ZTransferColors.accentBlue))
+                                        active: followLatest, activeColor: ZTransferColors.accentYellow, activeOutline: true))
                                     .accessibilityLabel(AppLocalized.resource("remote_review_follow"))
                                     .accessibilityValue(followLatest ? "1" : "0")
                                 }
                                 PreviewCircleButton(icon: .histogram, accessibilityKey: "cd_preview_histogram",
-                                    active: histogramMode != .off, histogramRGB: histogramMode == .rgb, size: metrics.size) {
+                                    active: histogramMode != .off, histogramRGB: histogramMode == .rgb, size: metrics.size,
+                                    tint: histogramMode == .off ? ZTransferColors.accentBlue : ZTransferColors.accentYellow,
+                                    activeColor: ZTransferColors.accentYellow, activeOutline: true) {
                                     if image && accepts(file) { onHistogram() }
+                                }
+                                if isReview {
+                                    Button(action: onOrientation) {
+                                        ReviewPhotoOrientationMark()
+                                            .foregroundStyle(followPhotoOrientation ? ZTransferColors.accentYellow : ZTransferColors.accentBlue)
+                                            .frame(width: metrics.size * 0.66, height: metrics.size * 0.66)
+                                            .frame(width: metrics.size, height: metrics.size)
+                                    }
+                                    .buttonStyle(ZTransferGlassButtonStyle(cornerRadius: metrics.size / 2,
+                                        active: followPhotoOrientation, activeColor: ZTransferColors.accentYellow, activeOutline: true))
+                                    .accessibilityLabel(AppLocalized.resource("remote_review_match_orientation"))
+                                    .accessibilityValue(followPhotoOrientation ? "1" : "0")
                                 }
                                 PreviewCircleButton(icon: .rotateLeft, accessibilityKey: "cd_rotate_photo", size: metrics.size) {
                                     if image && accepts(file) && rotationEnabled { onRotate() }
-                                }
+                                }.disabled(!rotationEnabled)
                             }
                             if isReview && landscapeReview {
                                 VStack(spacing: metrics.gap) { imageTools }
@@ -2148,6 +2214,8 @@ struct PreviewCircleButton: View {
     var histogramRGB = false
     var size: CGFloat = 44
     var tint: Color = ZTransferColors.accentBlue
+    var activeColor: Color = ZTransferColors.accentBlue
+    var activeOutline = false
     let action: () -> Void
 
     var body: some View {
@@ -2162,7 +2230,8 @@ struct PreviewCircleButton: View {
         .buttonStyle(ZTransferGlassButtonStyle(
             cornerRadius: size / 2,
             active: active,
-            activeColor: ZTransferColors.accentBlue
+            activeColor: activeColor,
+            activeOutline: activeOutline
         ))
         .accessibilityLabel(AppLocalized.resource(accessibilityKey))
     }
@@ -2445,6 +2514,8 @@ private struct PreviewImage: View {
     let highResolutionImage: UIImage?
     var initialThumbnail: UIImage? = nil
     let rotationDegrees: Double
+    var matchPhotoOrientation = false
+    var holdForOrientation = false
     let infoBottom: CGFloat?
     let interactive: Bool
     // Keep observing a second finger during an upward queue drag so it can
@@ -2465,6 +2536,10 @@ private struct PreviewImage: View {
     let onMagnificationChange: (Bool) -> Void
     let isCurrent: Bool
     var tapWhenZoomed = false
+    @State private var settledRotation: Double?
+    /// Matching a photo shows its angle immediately. Turning that off animates the
+    /// remembered angle back along the short arc; the manual button uses that same tween.
+    private var renderedRotation: Double { matchPhotoOrientation ? rotationDegrees : (settledRotation ?? rotationDegrees) }
     @State private var thumbnail: UIImage?
     @State private var remoteThumbnailUnavailable = false
     @State private var highResolutionAlpha: CGFloat = 0
@@ -2484,10 +2559,10 @@ private struct PreviewImage: View {
         let cachedThumbnail = thumbnail ?? initialThumbnail ?? session.memoryThumbnailImage(file: file)
         GeometryReader { proxy in
             let cropViewport = PhotoPreviewCropViewport(size: proxy.size, scale: scale, offset: offset,
-                rotation: rotationDegrees, infoBottom: infoBottom ?? 0)
+                rotation: renderedRotation, infoBottom: infoBottom ?? 0)
             let placement = zoomEnabled ? photoPreviewImagePlacement(
                 imageSize: (highResolutionImage ?? cachedThumbnail)?.size, viewportSize: proxy.size,
-                rotation: rotationDegrees, infoBottom: infoBottom, scale: scale, offset: offset,
+                rotation: renderedRotation, infoBottom: infoBottom, scale: scale, offset: offset,
                 cropTop: cropTop, cropProgress: cropProgress) : nil
             ZStack {
                 if let cachedThumbnail {
@@ -2496,7 +2571,7 @@ private struct PreviewImage: View {
                         #if DEBUG
                         .modifier(PreviewImageGeometryTrace(source: "thumb", id: file.id))
                         #endif
-                        .modifier(PhotoPreviewThumbnailVisibility(progress: highResolutionAlpha,
+                        .modifier(PhotoPreviewThumbnailVisibility(progress: matchPhotoOrientation && highResolutionImage != nil ? 1 : highResolutionAlpha,
                                                                   hasFHD: highResolutionImage != nil))
                 }
                 if let highResolutionImage {
@@ -2505,7 +2580,7 @@ private struct PreviewImage: View {
                         #if DEBUG
                         .modifier(PreviewImageGeometryTrace(source: "fhd", id: file.id))
                         #endif
-                        .opacity(cachedThumbnail == nil ? 1 : highResolutionAlpha)
+                        .opacity(matchPhotoOrientation || cachedThumbnail == nil ? 1 : highResolutionAlpha)
                 }
                 if zoomEnabled && cachedThumbnail == nil && highResolutionImage == nil {
                     if remoteThumbnailUnavailable {
@@ -2540,13 +2615,14 @@ private struct PreviewImage: View {
             .modifier(PreviewImageGeometryTrace(source: "stack", id: file.id))
             #endif
             .modifier(PreviewRotationTransform(
-                rotationDegrees: zoomEnabled ? rotationDegrees : 0,
-                targetRotationDegrees: zoomEnabled ? rotationDegrees : 0,
+                rotationDegrees: zoomEnabled ? renderedRotation : 0,
+                targetRotationDegrees: zoomEnabled ? renderedRotation : 0,
                 imageSize: zoomEnabled ? (highResolutionImage ?? cachedThumbnail)?.size : nil,
                 viewportSize: proxy.size,
                 infoBottom: infoBottom,
                 zoomScale: scale, cropTop: cropTop, cropProgress: cropProgress
             ))
+            .opacity(holdForOrientation ? 0 : 1)
             .offset(offset)
             .modifier(PhotoCropImageTransform(editor: cropEditor, active: cropActive))
             .simultaneousGesture(panGesture(
@@ -2557,8 +2633,9 @@ private struct PreviewImage: View {
                 viewportSize: proxy.size,
                 imageSize: (highResolutionImage ?? cachedThumbnail)?.size
             ))
+            .allowsHitTesting(!holdForOrientation)
             .overlay {
-                PreviewPinchObserver(enabled: pinchEnabled && zoomEnabled && isCurrent && (highResolutionImage ?? cachedThumbnail) != nil,
+                PreviewPinchObserver(enabled: pinchEnabled && zoomEnabled && isCurrent && !holdForOrientation && (highResolutionImage ?? cachedThumbnail) != nil,
                     onActive: { active in
                         magnifying = active
                         if !active { gestureStartOffset = offset; gestureStartScale = scale }
@@ -2608,6 +2685,9 @@ private struct PreviewImage: View {
                 onMagnificationChange(false)
             }
         }
+        .onAppear { settledRotation = rotationDegrees }
+        .onChange(of: rotationDegrees) { adoptSettledRotation($0) }
+        .onChange(of: matchPhotoOrientation) { _ in adoptSettledRotation(rotationDegrees) }
         .onChange(of: rotationDegrees) { _ in
             if cropActive { cropReturnScale = 1; cropReturnOffset = .zero }
             // Zoom reset is not part of the rotation tween. Keeping it out of
@@ -2676,6 +2756,17 @@ private struct PreviewImage: View {
     // These recognizers coexist with PageTabViewStyle's UIScrollView pan.
     // At 1x the image pan stays dormant so a one-finger horizontal drag belongs
     // only to the pager; a two-finger gesture explicitly rejects queue swiping.
+    private func adoptSettledRotation(_ target: Double) {
+        if matchPhotoOrientation {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { settledRotation = target }
+        } else {
+            let nearest = nearestRotationDegrees(from: settledRotation ?? target, to: target)
+            withAnimation(photoPreviewRotationAnimation) { settledRotation = nearest }
+        }
+    }
+
     private func applyPinch(factor: CGFloat, centroid: CGPoint, pan: CGSize,
                             viewportSize: CGSize, imageSize: CGSize?) {
         guard pinchEnabled, zoomEnabled, isCurrent else { return }
@@ -2684,16 +2775,16 @@ private struct PreviewImage: View {
         zoomAnimationActive = false
         let maximum = photoPreviewMaximumZoom(imageSize: imageSize,
                                                viewportSize: viewportSize,
-                                               rotationDegrees: rotationDegrees, infoBottom: infoBottom)
+                                               rotationDegrees: renderedRotation, infoBottom: infoBottom)
         let nextScale = min(max(scale * factor, 1), maximum)
         let placement = photoPreviewPlacement(imageSize: imageSize, viewportSize: viewportSize,
-                                              rotationDegrees: rotationDegrees, infoBottom: infoBottom)
+                                              rotationDegrees: renderedRotation, infoBottom: infoBottom)
         let proposed = previewPinchOffset(offset: offset,
             centroidFromCenter: CGPoint(x: centroid.x - placement.center.x,
                                         y: centroid.y - placement.center.y),
             factor: nextScale / scale, pan: pan)
         offset = photoPreviewClampedOffset(proposed, scale: nextScale, imageSize: imageSize,
-                                           viewportSize: viewportSize, rotationDegrees: rotationDegrees, infoBottom: infoBottom)
+                                           viewportSize: viewportSize, rotationDegrees: renderedRotation, infoBottom: infoBottom)
         scale = nextScale
         onZoomedChange(scale > 1.01)
     }
@@ -2711,7 +2802,7 @@ private struct PreviewImage: View {
                     scale: scale,
                     imageSize: imageSize,
                     viewportSize: viewportSize,
-                    rotationDegrees: rotationDegrees, infoBottom: infoBottom
+                    rotationDegrees: renderedRotation, infoBottom: infoBottom
                 )
             }
             .onEnded { _ in
@@ -2751,7 +2842,7 @@ private struct PreviewImage: View {
             scale: targetScale,
             imageSize: imageSize,
             viewportSize: viewportSize,
-            rotationDegrees: rotationDegrees, infoBottom: infoBottom
+            rotationDegrees: renderedRotation, infoBottom: infoBottom
         )
         zoomAnimationActive = true
         if !restoring { onZoomedChange(true) }

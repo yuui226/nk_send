@@ -321,6 +321,29 @@ private actor ReviewImageTransport: PTPCommandTransport {
 
 @MainActor
 final class RemotePhotoReviewModelTests: XCTestCase {
+    func testOrientationPreferenceIsIndependentAndRestoredWithoutChangingManualRotation() {
+        let name = "review-orientation-\(UUID())"
+        let defaults = UserDefaults(suiteName: name)!
+        defer { defaults.removePersistentDomain(forName: name) }
+        defaults.set(3, forKey: "preview_rotation_quarter_turns")
+        func makeModel() -> RemotePhotoReviewModel {
+            RemotePhotoReviewModel(frames: RemoteReviewFrameGate(), openCatalog: { throw CameraRepositoryError.invalidDataset },
+                endLiveView: {}, restartLiveView: {}, isConnected: { false }, defaults: defaults)
+        }
+        let model = makeModel()
+        XCTAssertFalse(model.followPhotoOrientation)
+        model.setFollowPhotoOrientation(true)
+        XCTAssertFalse(model.followLatest)
+        XCTAssertEqual(model.followRevision, 0)
+        XCTAssertTrue(makeModel().followPhotoOrientation)
+        model.setFollowLatest(true)
+        model.setFollowPhotoOrientation(false)
+        let restored = makeModel()
+        XCTAssertFalse(restored.followPhotoOrientation)
+        XCTAssertTrue(restored.followLatest)
+        XCTAssertEqual(defaults.integer(forKey: "preview_rotation_quarter_turns"), 3)
+    }
+
     private func photo(_ id: UInt32 = 1) -> CameraFile {
         CameraFile(id: id, storageID: 1, format: 0x3801, size: 100,
                    fileName: "A.JPG", captureDate: "20261015T120003", isProtected: false)

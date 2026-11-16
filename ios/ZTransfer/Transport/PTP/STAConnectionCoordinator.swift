@@ -148,6 +148,7 @@ actor STAConnectionCoordinator {
                     try Task.checkCancellation()
                     try profiles.rememberUnlessCancelled(guid: confirmedGUID, ip: candidate.ip, identity: .pairedComputer, model: failed.model)
                     lastFailure = nil
+                    await reportStage(.pairingAcknowledged)
                     try await wait("post_pairing_restart", completed.confirmation.remainingRestartDelay(now: now()))
                 } else if let cleanup = failed.cause as? STAPairingCleanupFailure {
                     guard paired, !cleanupRecoveryUsed, let previous = receipt,
@@ -208,6 +209,7 @@ actor STAConnectionCoordinator {
     private func reportStage(_ stage: STAConnectionStage) async {
         switch stage {
         case .pairing: pairingStage = true
+        case .pairingAcknowledged: break
         case .connecting: if pairingStage { return }
         case .discovering: if pairingStage { return }
         }
