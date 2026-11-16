@@ -497,6 +497,33 @@ internal fun PhotoPreviewOverlay(
     var rotationDegrees by remember {
         mutableFloatStateOf(-90f * Math.floorMod(initialRotationQuarterTurns, 4))
     }
+    fun resolvedReviewRotation(file: NikonCamera.FileInfo): Float? {
+        val image = highResolutionBitmaps[file.handle]
+            ?: displayedBitmaps[file.handle]
+            ?: cameraViewModel.cachedThumbnail(file.handle)
+            ?: return null
+        return com.ztransfer.crop.reviewDisplayRotationDegrees(
+            sourceOrientation = exifData[file.handle]?.orientation,
+            embeddedOrientation = fhdOrientations[file.handle],
+            width = image.width,
+            height = image.height,
+        )
+    }
+
+    fun reviewRotationDegrees(file: NikonCamera.FileInfo): Float {
+        if (review?.followPhotoOrientation != true) return rotationDegrees
+        return resolvedReviewRotation(file) ?: rotationDegrees
+    }
+
+    /** Photo angle is known, or both EXIF and preview loads have finished without one. */
+    fun reviewOrientationReady(file: NikonCamera.FileInfo): Boolean {
+        if (review?.followPhotoOrientation != true) return true
+        if (resolvedReviewRotation(file) != null) return true
+        val handle = file.handle
+        val exifDone = exifFinished[handle] == true
+        val previewDone = fhdUnavailable[handle] == true || highResolutionBitmaps[handle] != null
+        return exifDone && previewDone
+    }
     val previewViewport=remember(currentHandle) { PreviewViewportState() }
     var previewPlacement by remember(currentHandle) { mutableStateOf<PreviewImagePlacement?>(null) }
     var cropPlacement by remember { mutableStateOf<PreviewImagePlacement?>(null) }
@@ -605,15 +632,12 @@ internal fun PhotoPreviewOverlay(
                     }
                 } else {
                     val prepared=cameraViewModel.prepareCrop(file,bitmap,fhdOrientations[file.handle],rotationDegrees)
-                    val canonicalRotation=when(prepared.canonicalOrientation) {
-                        3 -> 180f
-                        6 -> 90f
-                        8 -> -90f
-                        1 -> 0f
+                    val canonicalRotation=com.ztransfer.crop.previewDegreesForExifOrientation(
+                        prepared.canonicalOrientation,
+                    ) ?: throw com.ztransfer.crop.CropPreparationException(
                         // Mirrored EXIF needs a reflection, not a guessed rotation.
-                        else -> throw com.ztransfer.crop.CropPreparationException(
-                            com.ztransfer.crop.CropPreparationException.Reason.ORIENTATION)
-                    }
+                        com.ztransfer.crop.CropPreparationException.Reason.ORIENTATION,
+                    )
                     val delta=((canonicalRotation-rotationDegrees+540f)%360f+360f)%360f-180f
                     val correctedRotation=rotationDegrees+delta
                     if (delta!=0f) {
@@ -1369,7 +1393,14 @@ internal fun PhotoPreviewOverlay(
                             exifFinished = exifFinished[file.handle] == true,
                         ),
                         loadEnabled = deferredLoadsEnabled,
-                        rotationDegrees = rotationDegrees,
+                        rotationDegrees = reviewRotationDegrees(file),
+                        animateRotation = review?.followPhotoOrientation != true,
+                        // Keep the bitmap hidden until its own angle is known, so it never
+                        // appears in the shared rotation and then turns into place.
+                        holdForOrientation = review?.followPhotoOrientation == true &&
+                            file.extension !in VIDEO_EXTENSIONS &&
+                            !reviewOrientationReady(file),
+                        matchPhotoOrientation = review?.followPhotoOrientation == true,
                         isCurrent = page == pagerState.currentPage,
                         interactive = previewGesturesEnabled,
                         viewportState = if(page==pagerState.currentPage) previewViewport else null,
@@ -1706,7 +1737,7 @@ internal fun PhotoPreviewOverlay(
             inputsEnabled = previewGesturesEnabled && !closing && pagingSettled,
             editEnabled = !burstTransitionBusy && !queueAnimating && !queueGestureActive,
             collapseEnabled = !queueAnimating && !queueGestureActive && queueMotionJob?.isActive != true,
-            rotationEnabled = !burstTransitionBusy,
+            rotationEnabled = !burstTransitionBusy && review?.followPhotoOrientation != true,
             effectsAvailable = photoEffectsViewModel != null,
             effectsEnabled = photoEffectsEnabled,
             isReview = review != null,
@@ -2052,9 +2083,16 @@ private fun PreviewPhotoTools(
                                     if (actionInputsEnabled) onHistogramModeChanged(histogramMode.next())
                                 },
                             )
-                            PreviewRotationButton(buttonSize = actionSize, onClick = {
-                                if (actionInputsEnabled && rotationEnabled) onRotate()
-                            })
+                            if (reviewOptions != null) {
+                                RemoteReviewOrientationButton(reviewOptions, buttonSize = actionSize)
+                            }
+                            PreviewRotationButton(
+                                buttonSize = actionSize,
+                                enabled = actionInputsEnabled && rotationEnabled,
+                                onClick = {
+                                    if (actionInputsEnabled && rotationEnabled) onRotate()
+                                },
+                            )
                         }
                         if (reviewOptions?.landscape == true) {
                             Column(verticalArrangement = Arrangement.spacedBy(actionGap),
@@ -2579,12 +2617,15 @@ private fun PreviewHistogramButton(
 ) {
     val colors = AppTheme.colors
     val description = stringResource(R.string.cd_preview_histogram)
+    val active = mode != HistogramMode.OFF
     GlassButton(
         onClick = onClick,
         modifier = Modifier.size(buttonSize),
         shape = CircleShape,
         contentPadding = PaddingValues(0.dp),
-        active = mode != HistogramMode.OFF,
+        active = active,
+        activeColor = colors.accentYellow,
+        activeOutline = true,
     ) {
         Box(
             modifier = Modifier
@@ -2594,7 +2635,7 @@ private fun PreviewHistogramButton(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            CompositionLocalProvider(LocalContentColor provides colors.accentBlue) {
+            CompositionLocalProvider(LocalContentColor provides if (active) colors.accentYellow else colors.accentBlue) {
                 HistogramMark(Modifier.size(20.dp), rgb = mode == HistogramMode.RGB)
             }
         }
@@ -2650,6 +2691,9 @@ private fun PreviewPage(
     allowRemoteThumbnailFallback: Boolean,
     loadEnabled: Boolean,
     rotationDegrees: Float,
+    animateRotation: Boolean = true,
+    holdForOrientation: Boolean = false,
+    matchPhotoOrientation: Boolean = false,
     isCurrent: Boolean,
     interactive: Boolean = true,
     viewportState: PreviewViewportState? = null,
@@ -2706,17 +2750,22 @@ private fun PreviewPage(
     LaunchedEffect(displayBitmap, isCurrent) {
         if (isCurrent) onDisplayBitmapChanged(displayBitmap)
     }
+    val visibleBitmap = if (holdForOrientation) null else displayBitmap
+    // Thumbnail pixels and the unrotated FHD often need different angles. Showing the
+    // sharp frame immediately avoids turning the thumbnail while it is still visible.
+    val snapToPhoto = matchPhotoOrientation && fhdBitmap != null
     val isVideo = file.extension in VIDEO_EXTENSIONS
     ZoomablePreviewViewport(
         modifier = modifier.padding(bottom=bottomInset),
         imageTop = imageTop,
         infoBottom = infoBottom,
         cropProgress = cropProgress,
-        imageSize = displayBitmap?.let { IntSize(it.width, it.height) },
+        imageSize = visibleBitmap?.let { IntSize(it.width, it.height) },
         stateKey = file.handle,
         externalState = viewportState,
         onPlacementChanged = onPlacementChanged,
         rotationDegrees = rotationDegrees,
+        animateRotation = animateRotation,
         isCurrent = isCurrent,
         zoomEnabled = interactive && isCurrent && !isVideo && displayBitmap != null,
         tapWhenZoomed = tapWhenZoomed,
@@ -2726,9 +2775,10 @@ private fun PreviewPage(
         val thumb = thumbnail  // 本地变量，delegate 属性无法被编译器 smart cast
         // 若 FHD 比缩略图先到，直接显示 FHD；不能等待 LaunchedEffect 下一帧再 snap，
         // 否则仍会产生一帧全透明图片区。
-        val effectiveFhdAlpha = if (thumb == null) 1f else fhdAlpha
+        val effectiveFhdAlpha = if (thumb == null || snapToPhoto) 1f else fhdAlpha
         val anyLoading = isLoadingFhd || (!noThumb && thumbnail == null)
         when {
+            holdForOrientation -> Unit
             isVideo -> {
                 // 视频无高清封面：缩略图压暗当背景 + 居中毛玻璃信息卡，明确暂不支持播放，
                 // 同时复用 ObjectInfo 已有的大小与拍摄时间，不为占位页增加相机请求。
@@ -2774,10 +2824,10 @@ private fun PreviewPage(
                     }
                 }
             }
-            displayBitmap != null -> {
+            visibleBitmap != null -> {
                 // 图像栈（缩略图淡出 + FHD 淡入）统一套用缩放/平移变换。
                 Box(modifier = imageTransform) {
-                    if (thumb != null && (fhdBitmap == null || effectiveFhdAlpha < 1f)) {
+                    if (!snapToPhoto && thumb != null && (fhdBitmap == null || effectiveFhdAlpha < 1f)) {
                         Image(
                             bitmap = thumb,
                             contentDescription = file.fileName.takeIf { fhdBitmap == null },
@@ -2826,13 +2876,22 @@ private fun ZoomablePreviewViewport(
     tapWhenZoomed: Boolean = false,
     comparisonEnabled: Boolean = false,
     onComparisonChange: (Boolean) -> Unit = {},
+    animateRotation: Boolean = true,
     content: @Composable BoxScope.(Modifier) -> Unit,
 ) {
-    val animatedRotation by animateFloatAsState(
-        targetValue = rotationDegrees,
-        animationSpec = tween(220),
-        label = "previewRotation",
-    )
+    // Matching a photo lands on its angle immediately. Turning that off animates from the
+    // settled angle back to the shared rotation; the manual rotate button uses the same tween.
+    val rotationAnim = remember { Animatable(rotationDegrees) }
+    LaunchedEffect(rotationDegrees, animateRotation) {
+        if (animateRotation) {
+            rotationAnim.animateTo(
+                com.ztransfer.crop.nearestRotationDegrees(rotationAnim.value, rotationDegrees),
+                tween(220),
+            )
+        }
+        else rotationAnim.snapTo(rotationDegrees)
+    }
+    val displayRotation = if (animateRotation) rotationAnim.value else rotationDegrees
     val comparisonHaptics = if (comparisonEnabled) rememberHaptics(LocalHapticsEnabled.current) else null
     val latestOnComparisonChange by rememberUpdatedState(onComparisonChange)
     val localState=remember(stateKey) { PreviewViewportState() }
@@ -3066,7 +3125,7 @@ private fun ZoomablePreviewViewport(
             val imageTransform = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val angle = Math.toRadians(animatedRotation.toDouble())
+                    val angle = Math.toRadians(displayRotation.toDouble())
                     val absCos = abs(cos(angle)).toFloat()
                     val absSin = abs(sin(angle)).toFloat()
                     val boundsWidth = baseImageW * absCos + baseImageH * absSin
@@ -3082,7 +3141,7 @@ private fun ZoomablePreviewViewport(
                     scaleY = scaleX
                     translationX = offset.x
                     translationY = offset.y + animatedLayout.centerY - viewportH / 2f
-                    rotationZ = animatedRotation
+                    rotationZ = displayRotation
                 }
             content(imageTransform)
         }

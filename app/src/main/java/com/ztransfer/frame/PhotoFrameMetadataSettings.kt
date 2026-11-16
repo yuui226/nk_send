@@ -179,7 +179,7 @@ internal fun PhotoFrameMetadata.withPresentation(
 ): PhotoFrameMetadata {
     val normalized = normalizePhotoFrameMetadataSettings(settings)
     val sourceMake = make?.trim()?.takeIf(String::isNotEmpty)
-    val sourceModel = model?.trim()?.takeIf(String::isNotEmpty)
+    val sourceModel = model?.trim()?.takeIf(String::isNotEmpty)?.let(::formatCameraGenerationLabel)
     val sourceLensModel = lensModel?.trim()?.takeIf(String::isNotEmpty)
     val inferredBrand = cameraBrandLabel(make, model).takeIf(String::isNotBlank)
     val sourceNormalizedModel = normalizeCameraModel(make, model)

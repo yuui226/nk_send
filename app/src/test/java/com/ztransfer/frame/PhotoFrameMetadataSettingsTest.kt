@@ -281,7 +281,7 @@ class PhotoFrameMetadataSettingsTest {
         )
 
         assertNull(visible.make)
-        assertEquals("Z 8", visible.model)
+        assertEquals("Z8", visible.model)
         assertNull(visible.aperture)
         assertNull(visible.shutter)
         assertNull(visible.iso)

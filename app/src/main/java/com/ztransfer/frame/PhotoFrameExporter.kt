@@ -2415,7 +2415,7 @@ object PhotoFrameExporter {
                 firstOffset = 58f
                 firstWidth = if (rightInfo.isNotEmpty()) 460f else 884f
                 val brand = metadata.make?.trim()?.takeIf(String::isNotBlank)?.uppercase(Locale.ROOT)
-                val model = metadata.model?.trim()?.takeIf(String::isNotBlank)
+                val model = normalizeCameraModel(metadata.make, metadata.model).takeIf(String::isNotBlank)
                 val lens = metadata.lensModel?.trim()?.takeIf(String::isNotBlank)
                 val primary = brand ?: model ?: lens
                 val secondary = listOfNotNull(model?.takeIf { brand != null && !it.equals(brand, true) },
@@ -5866,7 +5866,22 @@ internal fun cameraBrandLabel(make: String?, model: String?): String {
 /**
  * 很多相机会把厂商名同时写进 Make 和 Model（如 NIKON CORPORATION + NIKON Z 5）。
  * 品牌已经单独排版时，从机型开头移除重复厂商，避免出现“Nikon NIKON Z 5”。
+ * 剩下的型号去掉空格，并把它末尾的代数写成罗马数字，例如 NIKON Z 50_2 显示为 Z50II。
  */
+private val cameraGenerationSuffix = Regex("""_(\d{1,2})$""")
+private val cameraGenerationRomans = arrayOf(
+    "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X", "XI", "XII",
+)
+
+/** `Z50_2` is shown as `Z50II`. Only a trailing generation marker changes. */
+internal fun formatCameraGenerationLabel(model: String): String {
+    val match = cameraGenerationSuffix.find(model) ?: return model
+    val generation = match.groupValues[1].toInt()
+    val roman = cameraGenerationRomans.getOrNull(generation - 1) ?: return model
+    if (generation !in 2..cameraGenerationRomans.size) return model
+    return model.substring(0, match.range.first) + roman
+}
+
 internal fun normalizeCameraModel(make: String?, model: String?): String {
     val value = model?.trim().orEmpty()
     if (value.isEmpty()) return ""
@@ -5877,9 +5892,8 @@ internal fun normalizeCameraModel(make: String?, model: String?): String {
     }.distinctBy { it.lowercase(Locale.ROOT) }
         .sortedByDescending(String::length)
     val prefix = prefixes.firstOrNull { value.startsWith(it, ignoreCase = true) }
-        ?: return value
-    return value.substring(prefix.length)
-        .trimStart(' ', '-', '_')
+    val stripped = if (prefix == null) value else value.substring(prefix.length).trimStart(' ', '-', '_')
+    return formatCameraGenerationLabel(stripped).replace(" ", "")
 }
 
 internal fun frameDetailLine(metadata: PhotoFrameMetadata): String =

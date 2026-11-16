@@ -42,4 +42,20 @@ class CropSelectionTest {
         assertEquals(6,cropPreviewOrientation(6,null,1620,1080))
         assertEquals(3,cropPreviewOrientation(3,3,1620,1080))
     }
+    @Test fun reviewDisplayUsesTheSameOrientationAsCrop() {
+        assertEquals(0f, reviewDisplayRotationDegrees(6, null, 1080, 1620))
+        assertEquals(90f, reviewDisplayRotationDegrees(6, 6, 1920, 1080))
+        assertEquals(-90f, reviewDisplayRotationDegrees(8, null, 1920, 1080))
+        assertEquals(180f, reviewDisplayRotationDegrees(3, 3, 1920, 1080))
+        assertEquals(0f, reviewDisplayRotationDegrees(1, null, 1920, 1080))
+        assertNull(reviewDisplayRotationDegrees(5, 5, 1920, 1080))
+        assertNull(reviewDisplayRotationDegrees(null, null, 1920, 1080))
+    }
+    @Test fun returnRotationTakesTheShortArc() {
+        assertEquals(0f, nearestRotationDegrees(90f, 0f))
+        assertEquals(90f, nearestRotationDegrees(90f, -270f))
+        assertEquals(180f, nearestRotationDegrees(90f, -180f))
+        assertEquals(-90f, nearestRotationDegrees(0f, -90f))
+        assertEquals(180f, nearestRotationDegrees(180f, -180f))
+    }
 }

@@ -35,3 +35,32 @@ internal fun cropPreviewOrientation(source: Int, embedded: Int?, width: Int, hei
         source in 5..8 && height > width -> 1
         else -> source
     }
+
+/** Rotation that stands an unrotated camera bitmap up. Mirrored EXIF has no single angle. */
+internal fun previewDegreesForExifOrientation(orientation: Int): Float? = when (orientation) {
+    1 -> 0f
+    3 -> 180f
+    6 -> 90f
+    8 -> -90f
+    else -> null
+}
+
+/** Equivalent angle within half a turn, so a return to the shared rotation does not spin a full circle. */
+internal fun nearestRotationDegrees(from: Float, to: Float): Float {
+    val delta = ((to - from + 540f) % 360f + 360f) % 360f - 180f
+    return from + delta
+}
+
+/** Same orientation decision the crop editor uses, expressed as a preview rotation. */
+internal fun reviewDisplayRotationDegrees(
+    sourceOrientation: Int?,
+    embeddedOrientation: Int?,
+    width: Int,
+    height: Int,
+): Float? {
+    if (width <= 0 || height <= 0) return null
+    val source = sourceOrientation ?: embeddedOrientation ?: return null
+    return previewDegreesForExifOrientation(
+        cropPreviewOrientation(source, embeddedOrientation, width, height),
+    )
+}

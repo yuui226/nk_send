@@ -25,6 +25,12 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -62,6 +68,8 @@ internal class PhotoReviewOptions(
     val followLatest: Boolean = false,
     val followRevision: Int = 0,
     val onFollowLatestChanged: (Boolean) -> Unit = {},
+    val followPhotoOrientation: Boolean = false,
+    val onFollowPhotoOrientationChanged: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -207,8 +215,12 @@ internal fun RemotePhotoReview(
         val context = androidx.compose.ui.platform.LocalContext.current
         val preferences = remember(context) { context.getSharedPreferences("ztransfer", android.content.Context.MODE_PRIVATE) }
         var followLatest by remember { mutableStateOf(preferences.getBoolean("remote_review_follow_latest", false)) }
+        var followPhotoOrientation by remember {
+            mutableStateOf(preferences.getBoolean("remote_review_match_orientation", false))
+        }
         var followRevision by remember { mutableIntStateOf(0) }
         var hintVisible by remember { mutableStateOf(false) }
+        var hintMessage by remember { mutableIntStateOf(R.string.remote_review_follow_on) }
         var hintRevision by remember { mutableIntStateOf(0) }
         LaunchedEffect(hintRevision) {
             if (hintVisible) { delay(1800); hintVisible = false }
@@ -342,9 +354,18 @@ internal fun RemotePhotoReview(
                         followLatest = followLatest, followRevision = followRevision,
                         onFollowLatestChanged = { enabled ->
                             followLatest = enabled
+                            hintMessage = R.string.remote_review_follow_on
                             hintVisible = enabled
                             hintRevision++
                             preferences.edit().putBoolean("remote_review_follow_latest", enabled).apply()
+                        },
+                        followPhotoOrientation = followPhotoOrientation,
+                        onFollowPhotoOrientationChanged = { enabled ->
+                            followPhotoOrientation = enabled
+                            hintMessage = R.string.remote_review_match_orientation_on
+                            hintVisible = enabled
+                            hintRevision++
+                            preferences.edit().putBoolean("remote_review_match_orientation", enabled).apply()
                         },
                     ),
                     onDismiss = { requestClose() },
@@ -367,7 +388,7 @@ internal fun RemotePhotoReview(
                     .padding(horizontal = 16.dp).padding(bottom = if (rotation != 0) 64.dp else 88.dp),
             ) {
                 GlassHintSurface {
-                    Text(stringResource(R.string.remote_review_follow_on),
+                    Text(stringResource(hintMessage),
                         Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         maxLines = 1,
                         color = AppTheme.colors.onBackground,
@@ -381,7 +402,8 @@ internal fun RemotePhotoReview(
 @Composable
 internal fun RemoteReviewFollowButton(options: PhotoReviewOptions, buttonSize: androidx.compose.ui.unit.Dp = 44.dp) {
     val label = stringResource(R.string.remote_review_follow)
-    val color = AppTheme.colors.accentBlue
+    val activeColor = AppTheme.colors.accentYellow
+    val color = if (options.followLatest) activeColor else AppTheme.colors.accentBlue
     Box(Modifier.size(buttonSize)) {
         GlassButton(
             onClick = {
@@ -396,6 +418,8 @@ internal fun RemoteReviewFollowButton(options: PhotoReviewOptions, buttonSize: a
             shape = androidx.compose.foundation.shape.CircleShape,
             contentPadding = PaddingValues(0.dp),
             active = options.followLatest,
+            activeColor = activeColor,
+            activeOutline = true,
         ) {
             Text(
                 text = "NEW",
@@ -406,5 +430,90 @@ internal fun RemoteReviewFollowButton(options: PhotoReviewOptions, buttonSize: a
             )
         }
 
+    }
+}
+
+@Composable
+internal fun RemoteReviewOrientationButton(
+    options: PhotoReviewOptions,
+    buttonSize: androidx.compose.ui.unit.Dp = 44.dp,
+) {
+    val label = stringResource(R.string.remote_review_match_orientation)
+    val activeColor = AppTheme.colors.accentYellow
+    val color = if (options.followPhotoOrientation) activeColor else AppTheme.colors.accentBlue
+    Box(Modifier.size(buttonSize)) {
+        GlassButton(
+            onClick = {
+                options.onFollowPhotoOrientationChanged(!options.followPhotoOrientation)
+            },
+            modifier = Modifier.fillMaxSize().semantics {
+                contentDescription = label
+                role = androidx.compose.ui.semantics.Role.Switch
+                toggleableState = androidx.compose.ui.state.ToggleableState(options.followPhotoOrientation)
+            },
+            shape = androidx.compose.foundation.shape.CircleShape,
+            contentPadding = PaddingValues(0.dp),
+            active = options.followPhotoOrientation,
+            activeColor = activeColor,
+            activeOutline = true,
+        ) {
+            ReviewPhotoOrientationMark(Modifier.size(buttonSize * 0.66f), color)
+        }
+    }
+}
+
+/** Same circular arrow as the rotate button, with "auto" in the open center. */
+@Composable
+private fun ReviewPhotoOrientationMark(modifier: Modifier, color: Color) {
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val strokeWidth = size.minDimension * 0.078f
+            val radius = size.minDimension * 0.40f
+            val center = Offset(size.width / 2f, size.height / 2f)
+            // Rotate-left: the stroke arrives at the top from the right and the head points left.
+            val start = 200f
+            val sweep = -292f
+            drawArc(
+                color,
+                start,
+                sweep,
+                false,
+                Offset(center.x - radius, center.y - radius),
+                Size(radius * 2f, radius * 2f),
+                style = Stroke(strokeWidth, cap = StrokeCap.Round),
+            )
+            val end = Math.toRadians((start + sweep).toDouble())
+            val tip = Offset(
+                center.x + radius * cos(end).toFloat(),
+                center.y + radius * sin(end).toFloat(),
+            )
+            val direction = Offset(sin(end).toFloat(), -cos(end).toFloat())
+            val normal = Offset(-direction.y, direction.x)
+            val head = strokeWidth * 2.2f
+            val nose = tip + direction * head * 0.72f
+            val base = tip - direction * head * 0.22f
+            drawPath(
+                Path().apply {
+                    moveTo(nose.x, nose.y)
+                    lineTo(base.x + normal.x * head * 0.78f, base.y + normal.y * head * 0.78f)
+                    lineTo(base.x - normal.x * head * 0.78f, base.y - normal.y * head * 0.78f)
+                    close()
+                },
+                color,
+            )
+        }
+        val autoSize = maxWidth.value * 0.30f
+        Text(
+            text = "auto",
+            color = color,
+            maxLines = 1,
+            style = TextStyle(
+                fontWeight = FontWeight.Bold,
+                fontSize = autoSize.sp,
+                lineHeight = autoSize.sp,
+                letterSpacing = (-0.2).sp,
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+            ),
+        )
     }
 }

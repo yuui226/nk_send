@@ -20,10 +20,12 @@ internal fun PreviewRotationButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     buttonSize: Dp = 44.dp,
+    enabled: Boolean = true,
 ) {
     val colors = AppTheme.colors
     GlassButton(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier.size(buttonSize),
         shape = CircleShape,
         contentPadding = PaddingValues(buttonSize / 4f),

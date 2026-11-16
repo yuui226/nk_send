@@ -731,4 +731,6 @@
     <string name="photo_grain_hint">选择颗粒粗细，再调节强度；各档强度分别保存。</string>
     <string name="remote_review_follow">跟随最新</string>
     <string name="remote_review_follow_on">自动显示新照片</string>
+    <string name="remote_review_match_orientation">按照片方向显示</string>
+    <string name="remote_review_match_orientation_on">将按照片方向显示照片</string>
 </resources>

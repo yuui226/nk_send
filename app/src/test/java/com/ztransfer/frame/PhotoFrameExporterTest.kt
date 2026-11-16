@@ -597,7 +597,7 @@ class PhotoFrameExporterTest {
         assertEquals("26mm   F4.2   1/125s   ISO400", detail)
         assertEquals("Nikon", normalizeCameraMake("NIKON CORPORATION"))
         assertEquals(
-            "Z 5",
+            "Z5",
             normalizeCameraModel("NIKON CORPORATION", "NIKON Z 5"),
         )
         assertEquals(
@@ -668,11 +668,27 @@ class PhotoFrameExporterTest {
 
     @Test
     fun cameraModelOnlyRemovesARepeatedLeadingBrand() {
-        assertEquals("EOS R5", normalizeCameraModel("Canon", "Canon EOS R5"))
+        assertEquals("EOSR5", normalizeCameraModel("Canon", "Canon EOS R5"))
         assertEquals("ILCE-7M4", normalizeCameraModel("SONY", "SONY ILCE-7M4"))
         assertEquals("X-T5", normalizeCameraModel("FUJIFILM", "X-T5"))
         assertEquals("", normalizeCameraModel("NIKON", null))
-        assertEquals("Z 5", normalizeCameraModel(null, "Z 5"))
+        assertEquals("Z5", normalizeCameraModel(null, "Z 5"))
+        assertEquals("Z6II", normalizeCameraModel("NIKON CORPORATION", "NIKON Z 6_2"))
+        assertEquals("Z6III", normalizeCameraModel("NIKON CORPORATION", "NIKON Z 6_3"))
+        assertEquals("Z8", normalizeCameraModel("NIKON CORPORATION", "NIKON Z 8"))
+        assertEquals("Z30", normalizeCameraModel("NIKON CORPORATION", "NIKON Z 30"))
+        assertEquals("Z50", normalizeCameraModel("NIKON CORPORATION", "NIKON Z 50"))
+        assertEquals("Z50II", normalizeCameraModel("NIKON CORPORATION", "NIKON Z 50_2"))
+        assertEquals("Zf", normalizeCameraModel("NIKON CORPORATION", "NIKON Z f"))
+        assertEquals("Zfc", normalizeCameraModel("NIKON CORPORATION", "NIKON Z fc"))
+        assertEquals("X2D100C", normalizeCameraModel("Hasselblad", "Hasselblad X2D 100C"))
+        assertEquals("z50II", formatCameraGenerationLabel("z50_2"))
+        assertEquals("Z50II", formatCameraGenerationLabel("Z50_2"))
+        assertEquals("Z 6III", formatCameraGenerationLabel("Z 6_3"))
+        assertEquals("z8IV", formatCameraGenerationLabel("z8_4"))
+        assertEquals("Z 5", formatCameraGenerationLabel("Z 5"))
+        assertEquals("EOS R5", formatCameraGenerationLabel("EOS R5"))
+        assertEquals("model_1", formatCameraGenerationLabel("model_1"))
     }
 
     @Test
