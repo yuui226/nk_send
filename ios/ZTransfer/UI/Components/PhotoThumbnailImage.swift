@@ -127,6 +127,9 @@ private struct PhotoThumbnailImageContent: View {
             if let image = loader.image {
                 PhotoThumbnailBitmap(image: image, cornerRadius: cornerRadius,
                     fade: !loader.fadeComplete, onFadeComplete: { loader.finishFade() })
+                    // The cell owns tap/hold. Exclude iOS 17's UIKit wrapper
+                    // as well as the noninteractive UIImageView inside it.
+                    .allowsHitTesting(false)
             }
         }
         .overlay {

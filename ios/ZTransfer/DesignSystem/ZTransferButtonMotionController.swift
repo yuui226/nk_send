@@ -430,3 +430,137 @@ struct ZTransferHoldTouchObservation: UIViewRepresentable {
         }
     }
 }
+
+/// UIKit keeps quick taps, confirmed holds and ancestor pans independent on
+/// older SwiftUI runtimes. The native failure dependency consumes a hold's tap.
+struct ZTransferTapAndHoldInput: UIViewRepresentable {
+    let duration: TimeInterval
+    var maximumMovement: CGFloat = 12
+    var holdEnabled = true
+    let onTap: () -> Void
+    let onHold: () -> Void
+    var onDragChanged: ((CGFloat) -> Void)? = nil
+    var onDragEnded: ((CGFloat) -> Void)? = nil
+    var onDragCancelled: (() -> Void)? = nil
+    @Environment(\.isEnabled) private var enabled
+
+    func makeUIView(context: Context) -> TouchView { TouchView() }
+    func updateUIView(_ view: TouchView, context: Context) {
+        if view.hold.minimumPressDuration != duration { view.hold.minimumPressDuration = duration }
+        view.hold.allowableMovement = maximumMovement
+        view.hold.isEnabled = holdEnabled
+        view.drag.isEnabled = onDragChanged != nil
+        view.isUserInteractionEnabled = enabled
+        view.onTap = onTap
+        view.onHold = onHold
+        view.onDragChanged = onDragChanged
+        view.onDragEnded = onDragEnded
+        view.onDragCancelled = onDragCancelled
+    }
+    static func dismantleUIView(_ view: TouchView, coordinator: ()) {
+        view.onTap = nil
+        view.onHold = nil
+        view.onDragChanged = nil
+        view.onDragEnded = nil
+        view.onDragCancelled = nil
+    }
+
+    final class TouchView: UIView, UIGestureRecognizerDelegate {
+        let hold = PhotoEffectsImageInput.SingleFingerHold()
+        let drag = WheelDrag()
+        private let tap = UITapGestureRecognizer()
+        var onTap: (() -> Void)?
+        var onHold: (() -> Void)?
+        var onDragChanged: ((CGFloat) -> Void)?
+        var onDragEnded: ((CGFloat) -> Void)?
+        var onDragCancelled: (() -> Void)?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .clear
+            isAccessibilityElement = false
+            hold.addTarget(self, action: #selector(held))
+            tap.addTarget(self, action: #selector(tapped))
+            drag.addTarget(self, action: #selector(dragged))
+            tap.require(toFail: hold)
+            tap.require(toFail: drag)
+            let recognizers: [UIGestureRecognizer] = [hold, tap, drag]
+            for recognizer in recognizers {
+                recognizer.delegate = self
+                recognizer.cancelsTouchesInView = false
+                recognizer.delaysTouchesBegan = false
+                recognizer.delaysTouchesEnded = false
+                addGestureRecognizer(recognizer)
+            }
+        }
+        required init?(coder: NSCoder) { nil }
+
+        @objc private func tapped() {
+            if tap.state == .ended { onTap?() }
+        }
+        @objc private func held() {
+            if hold.state == .began { onHold?() }
+        }
+        @objc private func dragged() {
+            switch drag.state {
+            case .began, .changed: onDragChanged?(drag.translation)
+            case .ended: onDragEnded?(drag.translation)
+            case .cancelled: onDragCancelled?()
+            default: break
+            }
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            // Decorative SwiftUI press feedback can coexist. The wheel's
+            // own actions and the enclosing scroll view arbitrate exclusively.
+            other.view !== self && !(other.view is UIScrollView)
+        }
+    }
+
+    final class WheelDrag: UIGestureRecognizer {
+        private var contact: UITouch?
+        private var origin = CGPoint.zero
+        private(set) var translation: CGFloat = 0
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard contact == nil, touches.count == 1, let touch = touches.first else {
+                state = state == .possible ? .failed : .cancelled
+                return
+            }
+            contact = touch
+            origin = touch.location(in: view)
+        }
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let contact, touches.contains(contact) else { return }
+            let point = contact.location(in: view)
+            translation = point.y - origin.y
+            if state == .possible {
+                guard hypot(point.x - origin.x, translation) >= 8 else { return }
+                state = .began
+            } else {
+                state = .changed
+            }
+        }
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let contact, touches.contains(contact) else { return }
+            translation = contact.location(in: view).y - origin.y
+            state = state == .possible ? .failed : .ended
+        }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+            state = state == .possible ? .failed : .cancelled
+        }
+        override func reset() {
+            super.reset()
+            contact = nil
+            translation = 0
+        }
+        override func canBePrevented(by other: UIGestureRecognizer) -> Bool {
+            // Claim the approved 8pt wheel slop before an ancestor scroll pan.
+            // Short lists disable this recognizer and leave page scrolling free.
+            if let scroll = other.view as? UIScrollView,
+               other === scroll.panGestureRecognizer,
+               view?.isDescendant(of: scroll) == true { return false }
+            return super.canBePrevented(by: other)
+        }
+    }
+}

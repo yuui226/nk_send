@@ -24,6 +24,49 @@ final class ButtonInteractionUITests: XCTestCase {
         return app
     }
 
+    // Exercise the production RootView and its UIKit paging/attention hosts.
+    // The material harness alone cannot catch input blocked by these ancestors.
+    func testRealConnectionToPhotoListWithFrostedGlass() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-app_language", "en", "-skin_preset", "FROSTED_GLASS",
+            "-collapse_burst_photos", "NO", "-tap_to_preview", "YES",
+            "-thumbnail_columns", "3", "-photo_loading_range_days", "0"]
+        app.launch()
+        defer { app.terminate() }
+        let helpButtons = app.buttons.matching(NSPredicate(format: "label IN %@",
+            ["STA connection guide", "A faster way to connect"]))
+        XCTAssertTrue(helpButtons.firstMatch.waitForExistence(timeout: 10))
+        let help = try XCTUnwrap(helpButtons.allElementsBoundByIndex.first { $0.isHittable })
+        let guideTitle = help.label
+        help.tap()
+        XCTAssertTrue(app.staticTexts[guideTitle].waitForExistence(timeout: 5))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"),
+            object: app.staticTexts[guideTitle])
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 3), .completed)
+        let settings = app.buttons["popup-trigger-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        let close = app.buttons["Close"].firstMatch
+        XCTAssertTrue(close.waitForExistence(timeout: 5))
+        close.tap()
+        XCTAssertTrue(app.buttons["debug-photo-library"].waitForExistence(timeout: 5))
+        app.buttons["debug-photo-library"].tap()
+        let day = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "enqueue-day-")).firstMatch
+        XCTAssertTrue(day.waitForExistence(timeout: 10))
+        app.buttons["workspace-queue-open"].tap()
+        let back = app.buttons["workspace-queue-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(day.waitForExistence(timeout: 5))
+        let header = day.frame
+        let side = (app.frame.width - 36) / 3
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: 12 + side / 2, dy: header.maxY + 10 + side / 2)).tap()
+        XCTAssertTrue(app.buttons["Rotate photo"].waitForExistence(timeout: 5),
+            "A photo must still open after the connection handoff and queue round trip")
+    }
+
     func testRatingLoadingCanBeStoppedWhileProgressChangesAndStartedAgain() {
         let app = XCUIApplication()
         app.launchArguments = ["--button-motion-ui-test", "--rating-chip-interaction-test"]
@@ -39,6 +82,40 @@ final class ButtonInteractionUITests: XCTestCase {
         XCTAssertEqual(app.staticTexts["rating-toggle-state"].label, "enabled=true;toggles=2")
         point.press(forDuration: 0.18)
         XCTAssertEqual(app.staticTexts["rating-toggle-state"].label, "enabled=false;toggles=3")
+    }
+
+    func testStoredLiquidGlassUsesOnlySupportedSettingsOptions() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--list-admission-ui-test", "--stored-liquid-glass",
+            "-app_language", "en", "-photo_loading_range_days", "0"]
+        app.launch()
+        defer { app.terminate() }
+        let settings = app.buttons["popup-trigger-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        settings.tap()
+        XCTAssertTrue(app.buttons["Close"].firstMatch.waitForExistence(timeout: 5))
+        let style = app.buttons["Button style"]
+        for _ in 0..<6 {
+            if style.isHittable { break }
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.05, thenDragTo:
+                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)))
+        }
+        XCTAssertTrue(style.isHittable)
+        let initial: String
+        let cycle: [String]
+        if #available(iOS 26.0, *) {
+            initial = "Liquid Glass"
+            cycle = ["Frosted Glass", "Wood", "Camera Buttons", "Titanium", "Liquid Glass"]
+        } else {
+            initial = "Frosted Glass"
+            cycle = ["Wood", "Camera Buttons", "Titanium", "Frosted Glass"]
+        }
+        XCTAssertEqual(style.value as? String, initial)
+        for expected in cycle {
+            style.tap()
+            XCTAssertEqual(style.value as? String, expected)
+        }
     }
 
     func testNativeActionsAndDisabledStateAcrossAllMaterials() {

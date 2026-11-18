@@ -7,8 +7,9 @@ enum IOSLocalization {
     static let byResource: [String: [String: String]] = [
         // User-approved native accessory picker for Nikon's Classic pairing phase.
         "gps_ios_system_pairing": ["zh": "在系统“选择配件”窗口选择相机，核对配对码，并在手机和相机上确认。", "en": "Select your camera in the system accessory picker, check the pairing code, and confirm on both the iPhone and camera.", "hant": "在系統「選擇配件」視窗選擇相機，核對配對碼，並在手機和相機上確認。"],
-        "gps_ios_confirm_pairing": ["zh": "配对未完成。若点选相机后窗口自动关闭，请先在手机“设置 → 蓝牙”中忽略这台相机。然后在相机重新开始配对，并在手机和相机上确认配对码。", "en": "Pairing is incomplete. If the picker closes after you select the camera, first forget that camera in Settings → Bluetooth. Then restart pairing on the camera and confirm the pairing code on both devices.", "hant": "配對未完成。若點選相機後視窗自動關閉，請先在手機「設定 → 藍牙」中忘記這台相機。然後在相機重新開始配對，並在手機和相機上確認配對碼。"],
-        "gps_ios_forget_pairing": ["zh": "请到手机“设置 → 蓝牙”，点相机旁的 ⓘ 并选择“忽略此设备”，再在相机上重新开始配对。", "en": "In Settings → Bluetooth, tap ⓘ next to the camera and choose Forget This Device, then restart pairing on the camera.", "hant": "請到手機「設定 → 藍牙」，點相機旁的 ⓘ 並選擇「忘記此裝置」，再在相機上重新開始配對。"],
+        "gps_ios_confirm_pairing": ["zh": "若曾配对，请在「设置 → 蓝牙」中忽略此设备，再重新配对。", "en": "If previously paired, use Forget This Device in Settings → Bluetooth, then pair again.", "hant": "若曾配對，請在「設定 → 藍牙」中忘記此裝置，再重新配對。"],
+        "gps_ios_forget_pairing": ["zh": "在「设置 → 蓝牙」中忽略此设备，再重新配对。", "en": "Use Forget This Device in Settings → Bluetooth, then pair again.", "hant": "在「設定 → 藍牙」中忘記此裝置，再重新配對。"],
+        "gps_ios_clear_pairing_message": ["zh": "确认后将清除 App 内的配对记录。请再到「设置 → 蓝牙」，点相机旁的 ⓘ，选择「忽略此设备」，然后重新配对。", "en": "This clears the pairing record in the app. Then go to Settings → Bluetooth, tap ⓘ next to the camera, and choose Forget This Device before pairing again.", "hant": "確認後將清除 App 內的配對記錄。請再到「設定 → 藍牙」，點相機旁的 ⓘ，選擇「忘記此裝置」，然後重新配對。"],
         // Native recovery guidance; missing grants are requested in the app.
         "gps_ios_locationDenied": ["zh": "请前往“设置 → 隐私与安全性 → 定位服务 → Z传”允许定位，返回后自动继续。", "en": "Allow access in Settings → Privacy & Security → Location Services → ZTransfer, then return to continue.", "hant": "請前往「設定 → 隱私權與安全性 → 定位服務 → Z傳」允許定位，返回後自動繼續。"],
         "gps_ios_locationRestricted": ["zh": "定位权限受系统限制，请检查屏幕使用时间或设备管理限制。", "en": "Location access is restricted. Check Screen Time or device management restrictions.", "hant": "定位權限受系統限制，請檢查螢幕使用時間或裝置管理限制。"],

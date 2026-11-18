@@ -483,10 +483,19 @@ private struct TipGuideToolMark: View {
 
 /// A full modal region also blocks the native Home pager before it recognizes
 /// a drag. It does not intercept help buttons or the guide's own scroll view.
-struct PopupDragBoundary: UIViewRepresentable {
+struct PopupDragBoundary: View {
     var enabled = true
-    func makeUIView(context: Context) -> PopupDragBoundaryView { PopupDragBoundaryView() }
-    func updateUIView(_ uiView: PopupDragBoundaryView, context: Context) { uiView.blocksGestures = enabled }
+    var body: some View {
+        Region(enabled: enabled).allowsHitTesting(false)
+    }
+
+    // This view only registers geometry for the native pager. Disable the
+    // SwiftUI wrapper too, since iOS 17 can hit it above the page's controls.
+    private struct Region: UIViewRepresentable {
+        let enabled: Bool
+        func makeUIView(context: Context) -> PopupDragBoundaryView { PopupDragBoundaryView() }
+        func updateUIView(_ uiView: PopupDragBoundaryView, context: Context) { uiView.blocksGestures = enabled }
+    }
 }
 final class PopupDragBoundaryView: UIView {
     var blocksGestures = true

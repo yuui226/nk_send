@@ -54,7 +54,6 @@ struct DetentWheel<Option: Hashable>: View {
     @State private var position: CGFloat
     @State private var dragging = false
     @State private var dragSession: DetentWheelDragSession<Option>
-    @GestureState private var gestureActive = false
     @GestureState private var pressing = false
     private let longPressDurationMilliseconds = 450
     // These inputs are immutable for a view value. A new parent configuration
@@ -190,18 +189,9 @@ struct DetentWheel<Option: Hashable>: View {
             // click controls; disabling their drag recognizer lets a
             // press-and-drag continue into the page pager instead of being
             // trapped by a high-priority tap recognizer.
-            let interactiveSurface = surface
-            .id(gestureConfiguration)
-            .contentShape(Rectangle())
-            // A normal tap keeps the control clickable without installing a
-            // second high-priority recognizer that can delay the enclosing
-            // page's vertical drag.
-            .gesture(clickGesture, including: canDrag ? .subviews : .all)
-            // ReleaseCommitWheel detects hold and vertical drag together. If
-            // drag alone has priority, a stationary hold waits for finger-up
-            // before SwiftUI lets the 450ms recognizer deliver its action.
-            .highPriorityGesture(clickGesture.simultaneously(with: dragGesture),
-                                 including: canDrag ? .all : .subviews)
+            let interactiveSurface = inputSurface(surface
+                .id(gestureConfiguration)
+                .contentShape(Rectangle()))
             .simultaneousGesture(pressGesture,
                 including: prominentPressFeedback ? .all : .subviews)
             .scaleEffect(prominentPressFeedback && pressing ? 0.96 : 1)
@@ -229,6 +219,7 @@ struct DetentWheel<Option: Hashable>: View {
         .accessibilityValue(Text(AppLocalized.text(optionLabel(options[selectedIndex])) + (favoriteOption(options[selectedIndex]) ? "，已收藏" : "")))
         .accessibilityHint(Text(readOnly ? AppLocalized.text("只读") : AppLocalized.resource("photo_effects_wheel_hint")))
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction { activate() }
         .onChange(of: selected) { value in sync(value: value) }
         .onChange(of: gestureConfiguration) { configuration in
             // Android restarts pointerInput for these keys. Invalidate queued
@@ -251,16 +242,10 @@ struct DetentWheel<Option: Hashable>: View {
             guard frame != .zero else { return }
             onContentAnchorChange?(frame)
         }
-        .onChange(of: gestureActive) { active in
-            // GestureState resets automatically when SwiftUI cancels a drag
-            // (for example when a parent ScrollView takes ownership). A normal
-            // release clears `dragging` in onEnded first, so only cancellation
-            // reaches this rollback path.
-            if !active, dragging {
-                dragSession.invalidate()
-                dragging = false
-                position = CGFloat(selectedIndex)
-            }
+        .onDisappear {
+            dragSession.invalidate()
+            dragging = false
+            position = CGFloat(selectedIndex)
         }
     }
 
@@ -317,36 +302,36 @@ struct DetentWheel<Option: Hashable>: View {
         }
     }
 
-    private var dragGesture: some Gesture {
-        let revision = dragSession.revision
-        // Match the 8pt touch slop used by the other Android gesture ports.
-        // A 2pt drift while holding used to claim the drag and cancel a hold.
-        return DragGesture(minimumDistance: canDrag ? 8 : .infinity)
-            .updating($gestureActive) { _, active, _ in active = true }
-            .onChanged { value in
-                guard revision == dragSession.revision, enabled, !readOnly, canDrag else { return }
-                if !dragging {
-                    guard dragSession.begin(revision: revision, selectedIndex: selectedIndex) else { return }
-                    position = CGFloat(selectedIndex)
-                    dragging = true
-                }
-                guard let next = dragSession.preview(revision: revision, translation: value.translation.height) else { return }
-                if Int(next.rounded()) != Int(position.rounded()) { emitDetent() }; position = next
-            }
-            .onEnded { value in
-                guard revision == dragSession.revision else { return }
-                guard dragging, enabled, !readOnly, canDrag else {
-                    dragSession.invalidate()
-                    dragging = false
-                    position = CGFloat(selectedIndex)
-                    return
-                }
-                guard let target = dragSession.release(revision: revision, translation: value.translation.height) else { return }
-                dragSession.invalidate()
-                dragging = false
-                withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
-                if target != selectedIndex { onCommit(options[target]) }
-            }
+    private func updateDrag(_ translation: CGFloat, revision: UInt64) {
+        guard revision == dragSession.revision, canDrag else { return }
+        if !dragging {
+            guard dragSession.begin(revision: revision, selectedIndex: selectedIndex) else { return }
+            position = CGFloat(selectedIndex)
+            dragging = true
+        }
+        guard let next = dragSession.preview(revision: revision, translation: translation) else { return }
+        if Int(next.rounded()) != Int(position.rounded()) { emitDetent() }
+        position = next
+    }
+
+    private func endDrag(_ translation: CGFloat, revision: UInt64) {
+        guard revision == dragSession.revision else { return }
+        guard dragging, canDrag,
+              let target = dragSession.release(revision: revision, translation: translation) else {
+            cancelDrag(revision: revision)
+            return
+        }
+        dragSession.invalidate()
+        dragging = false
+        withAnimation(ZTransferMotion.standard) { position = CGFloat(target) }
+        if target != selectedIndex { onCommit(options[target]) }
+    }
+
+    private func cancelDrag(revision: UInt64) {
+        guard revision == dragSession.revision else { return }
+        dragSession.invalidate()
+        dragging = false
+        position = CGFloat(selectedIndex)
     }
 
     private func activate() {
@@ -361,37 +346,25 @@ struct DetentWheel<Option: Hashable>: View {
         onCommit(options[target])
     }
 
-    private var clickGesture: AnyGesture<Void> {
+    private func inputSurface<Content: View>(_ content: Content) -> some View {
         let revision = dragSession.revision
-        guard onLongClick != nil else {
-            return AnyGesture(TapGesture().onEnded {
-                guard revision == dragSession.revision, !dragging else { return }
-                activate()
-            })
+        return content.overlay {
+            ZTransferTapAndHoldInput(duration: Double(longPressDurationMilliseconds) / 1_000,
+                maximumMovement: 10, holdEnabled: onLongClick != nil,
+                onTap: {
+                    guard revision == dragSession.revision, !dragging else { return }
+                    activate()
+                }, onHold: {
+                    guard parentEnabled, enabled, !readOnly, !dragging,
+                          revision == dragSession.revision else { return }
+                    dragSession.invalidate()
+                    ZTransferHaptics.shared.confirmLongPress { onLongClick?() }
+                }, onDragChanged: canDrag ? { updateDrag($0, revision: revision) } : nil,
+                onDragEnded: { endDrag($0, revision: revision) },
+                onDragCancelled: { cancelDrag(revision: revision) })
+                .allowsHitTesting(parentEnabled && enabled && !readOnly)
+                .accessibilityHidden(true)
         }
-        // One touch sequence chooses exactly one action. A completed long
-        // press consumes its own release; the next touch has a fresh choice.
-        // Unlike a timer-based tap guard, cancellation leaves no delayed state.
-        return AnyGesture(
-            LongPressGesture(minimumDuration: Double(longPressDurationMilliseconds) / 1_000)
-                .exclusively(before: TapGesture())
-                .onEnded { result in
-                    guard parentEnabled, enabled, !readOnly, !dragging, revision == dragSession.revision else { return }
-                    switch result {
-                    case .first(let completed):
-                        if completed {
-                            dragSession.invalidate()
-                            // A wheel press may become a drag or remain on one
-                            // empty/boundary detent. Never start motor feedback
-                            // at touch-down; confirm only a recognized menu action.
-                            ZTransferHaptics.shared.confirmLongPress { onLongClick?() }
-                        }
-                    case .second:
-                        activate()
-                    }
-                }
-                .map { _ in () }
-        )
     }
 
     private var pressGesture: some Gesture {

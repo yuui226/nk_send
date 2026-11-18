@@ -61,7 +61,7 @@ final class GPSProtocolTests: XCTestCase {
 
     @MainActor
     func testFreshIDACKRequiresSystemPairingThenNewBLEHandshakeBeforeReady() throws {
-        for result: NikonGPSSystemPairingResult in [.paired, .alreadyConnected, .notFound, .failed] {
+        for result: NikonGPSSystemPairingResult in [.paired, .alreadyConnected, .notFound, .failed, .cancelled] {
             let suite = "GPSSystemPairingSuccess-\(UUID())", defaults = UserDefaults(suiteName: suite)!
             defer { defaults.removePersistentDomain(forName: suite) }
             let pairing = GPSControlledSystemPairing()
@@ -88,17 +88,31 @@ final class GPSProtocolTests: XCTestCase {
             XCTAssertEqual(geoAccepted, false)
             pairing.complete(0, result)
             XCTAssertEqual(Array(events.suffix(2)), [.verifyingPairing("Z30_123"), .disconnected])
+            XCTAssertEqual(client.reconnectPreference, .knownCameraFirst)
             XCTAssertTrue(client.hasPairingIdentity)
             XCTAssertFalse(client.hasSavedPairing)
             XCTAssertFalse(defaults.bool(forKey: GPSPreferences.pairingConfirmed))
-            XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingVerificationPending))
-            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), Int(packet.device))
-            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.nonce), Int(packet.nonce))
+            if result == .cancelled {
+                XCTAssertNil(defaults.object(forKey: GPSPreferences.pairingVerificationPending))
+                XCTAssertNil(defaults.object(forKey: GPSPreferences.deviceID))
+                XCTAssertNil(defaults.object(forKey: GPSPreferences.nonce))
+            } else {
+                XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingVerificationPending))
+                XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), Int(packet.device))
+                XCTAssertEqual(defaults.integer(forKey: GPSPreferences.nonce), Int(packet.nonce))
+            }
             XCTAssertNil(defaults.string(forKey: GPSPreferences.bleAddress))
             let afterPair = events
             pairing.complete(0, result)
             XCTAssertEqual(events, afterPair)
-            client.stop(); client.start()
+            if result == .cancelled {
+                // The fake close above only counts requests. Retire its
+                // handshake in the same way as a failed verification link.
+                XCTAssertTrue(client.retryPairingVerification())
+            } else {
+                client.stop()
+            }
+            client.start()
             let reconnect = client.preparePairingIdentity()
             XCTAssertEqual(reconnect.device, packet.device)
             XCTAssertEqual(reconnect.nonce, packet.nonce)
@@ -109,7 +123,10 @@ final class GPSProtocolTests: XCTestCase {
             XCTAssertFalse(client.hasSavedPairing)
             client.confirmIdentityAfterGeoWrite()
             XCTAssertTrue(client.hasSavedPairing)
+            XCTAssertEqual(client.reconnectPreference, .systemConnectedFirst)
             XCTAssertTrue(defaults.bool(forKey: GPSPreferences.pairingConfirmed))
+            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), Int(packet.device))
+            XCTAssertEqual(defaults.integer(forKey: GPSPreferences.nonce), Int(packet.nonce))
             XCTAssertNil(defaults.object(forKey: GPSPreferences.pairingVerificationPending))
         }
     }
@@ -153,8 +170,9 @@ final class GPSProtocolTests: XCTestCase {
     }
 
     @MainActor
-    func testSystemPairingFailureNeverCommitsIdentityOrReportsReady() {
-        for result: NikonGPSSystemPairingResult in [.cancelled, .timedOut] {
+    func testSystemPairingTimeoutNeverCommitsIdentityOrReportsReady() {
+        let result = NikonGPSSystemPairingResult.timedOut
+        do {
             let suite = "GPSSystemPairingFailure-\(UUID())", defaults = UserDefaults(suiteName: suite)!
             defer { defaults.removePersistentDomain(forName: suite) }
             let pairing = GPSControlledSystemPairing()
@@ -172,6 +190,106 @@ final class GPSProtocolTests: XCTestCase {
             XCTAssertFalse(client.hasSavedPairing)
             XCTAssertEqual(client.state, .failed(result.failureMessage))
         }
+    }
+
+    @MainActor
+    func testAmbiguousPickerDismissalKeepsVerifyingUntilBoundedFailureOrExplicitStop() async throws {
+        for action in ["expire", "stop", "reset", "adapter", "verified"] {
+            let suite = "GPSAmbiguousPairing-\(UUID())", defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let pairing = GPSControlledSystemPairing(), clock = GPSDeferredClock()
+            let client = NikonGPSBluetoothClient(defaults: defaults, sleep: { await clock.wait($0) },
+                centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
+            let coordinator = GPSCoordinator(defaults: defaults, bluetooth: client, locationManager: GPSControlledLocationManager(),
+                bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
+            defer { coordinator.setEnabled(false) }
+            coordinator.setEnabled(true)
+            let proposed = client.preparePairingIdentity()
+            _ = client.takeControllerIDPayload()
+            client.controllerIDDidWrite(cameraName: "Z50_2") {}
+            for _ in 0..<100 where await clock.count < 1 { try await Task.sleep(for: .milliseconds(5)) }
+            pairing.complete(0, .cancelled)
+            for _ in 0..<100 where await clock.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+            let delays = await clock.delays
+            XCTAssertEqual(delays, [30_000_000_000, 30_000_000_000])
+            XCTAssertEqual(coordinator.state.status, .connecting)
+            XCTAssertEqual(coordinator.state.message, AppLocalized.text("正在确认配对"))
+            XCTAssertNil(coordinator.state.pairingGuidance)
+            XCTAssertTrue(client.hasPairingIdentity)
+            XCTAssertFalse(client.hasSavedPairing)
+            XCTAssertFalse(NikonGPSBluetoothClient(defaults: defaults).hasPairingIdentity)
+
+            coordinator.applyBluetoothFailure("GPS connection confirmation timeout")
+            XCTAssertEqual(coordinator.state.status, .connecting)
+            XCTAssertTrue(client.hasPairingIdentity)
+            XCTAssertEqual(pairing.names, ["Z50_2"])
+
+            if action == "stop" { coordinator.setEnabled(false) }
+            if action == "reset" { client.clearPairing() }
+            if action == "adapter" { client.invalidateAdapterConnection() }
+            if action == "verified" {
+                let retry = client.preparePairingIdentity()
+                XCTAssertEqual(retry.device, proposed.device)
+                XCTAssertEqual(retry.nonce, proposed.nonce)
+                _ = client.takeControllerIDPayload()
+                client.controllerIDDidWrite(cameraName: "Z50_2") { XCTFail("Reconnect must not open another picker") }
+                XCTAssertFalse(client.hasSavedPairing, "ID ACK is not GEO ACK")
+                client.confirmIdentityAfterGeoWrite()
+            }
+            await clock.release(0)
+            await clock.release(1)
+            if action == "expire" {
+                for _ in 0..<100 where coordinator.state.status != .needsCamera { try await Task.sleep(for: .milliseconds(5)) }
+                XCTAssertEqual(coordinator.state.status, .needsCamera)
+                XCTAssertNotNil(coordinator.state.pairingGuidance)
+            } else {
+                for _ in 0..<10 { await Task.yield() }
+                XCTAssertNotEqual(coordinator.state.status, .needsCamera)
+            }
+            pairing.complete(0, .paired)
+            XCTAssertEqual(client.hasPairingIdentity, action == "verified")
+            XCTAssertEqual(client.hasSavedPairing, action == "verified")
+            XCTAssertEqual(defaults.bool(forKey: GPSPreferences.pairingConfirmed), action == "verified")
+            XCTAssertEqual(pairing.names, ["Z50_2"])
+        }
+    }
+
+    @MainActor
+    func testPickerNotFoundNotificationFailureSwitchesToScanWithoutShowingRetryUntilDeadline() async throws {
+        let suite = "GPSPickerNotificationFailure-\(UUID())", defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let pairing = GPSControlledSystemPairing(), clock = GPSDeferredClock()
+        let client = NikonGPSBluetoothClient(defaults: defaults, sleep: { await clock.wait($0) },
+            centralFactory: { _, _ in CBCentralManager(delegate: nil, queue: .main) }, systemPairing: pairing)
+        let coordinator = GPSCoordinator(defaults: defaults, bluetooth: client, locationManager: GPSControlledLocationManager(),
+            bluetoothAuthorization: { .allowedAlways }, applicationIsActive: { true })
+        defer { coordinator.setEnabled(false) }
+        coordinator.setEnabled(true)
+        let proposed = client.preparePairingIdentity()
+        _ = client.takeControllerIDPayload()
+        client.controllerIDDidWrite(cameraName: "Camera") {}
+        for _ in 0..<100 where await clock.count < 1 { try await Task.sleep(for: .milliseconds(5)) }
+        pairing.complete(0, .notFound)
+        for _ in 0..<100 where await clock.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        let delays = await clock.delays
+        XCTAssertEqual(delays, [30_000_000_000, 30_000_000_000])
+        XCTAssertEqual(client.reconnectPreference, .knownCameraFirst)
+        coordinator.applyBluetoothState(.failed("Camera GPS notification unavailable"))
+        XCTAssertEqual(client.reconnectPreference, .scan)
+        XCTAssertEqual(coordinator.state.status, .connecting)
+        XCTAssertEqual(coordinator.state.message, AppLocalized.text("正在确认配对"))
+        XCTAssertEqual(defaults.integer(forKey: GPSPreferences.deviceID), Int(proposed.device))
+        XCTAssertFalse(client.hasSavedPairing)
+        XCTAssertEqual(pairing.names, ["Camera"])
+
+        await clock.release(0)
+        await clock.release(1)
+        for _ in 0..<100 where coordinator.state.status != .error { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(coordinator.state.status, .error)
+        XCTAssertTrue(client.hasPairingIdentity)
+        XCTAssertFalse(client.hasSavedPairing)
+        XCTAssertFalse(client.retryPairingVerification())
+        XCTAssertEqual(pairing.names, ["Camera"])
     }
 
     @MainActor
@@ -210,7 +328,10 @@ final class GPSProtocolTests: XCTestCase {
                 XCTAssertTrue(client.hasPairingIdentity)
                 XCTAssertFalse(client.hasSavedPairing)
                 for _ in 0..<100 where await clock.count < 2 { try await Task.sleep(for: .milliseconds(5)) }
+                for _ in 0..<100 where await clock.count < 3 { try await Task.sleep(for: .milliseconds(5)) }
+                client.stop()
                 await clock.release(1)
+                await clock.release(2)
             }
         }
     }
@@ -1265,11 +1386,21 @@ final class GPSProtocolTests: XCTestCase {
         let coordinator = GPSCoordinator(defaults: defaults, bluetooth: transport, locationManager: manager)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let window = UIWindow(windowScene: scene)
-        let host = UIHostingController(rootView: GPSConnectionControl(coordinator: coordinator,
-            expanded: .constant(true), showingResetPairing: .constant(false), availableHeight: 500)
-            .frame(width: 280).padding(20).frame(width: 320, height: 500, alignment: .topLeading)
+        let viewport = CGSize(width: 375, height: 647)
+        let layout = ConnectionLayout(size: viewport)
+        let host = UIHostingController(rootView:
+            ConnectionSceneLayout(viewport: viewport, keepsGPSPanelAnchor: true) {
+                Color.clear
+                GPSConnectionControl(coordinator: coordinator,
+                    expanded: .constant(true), showingResetPairing: .constant(false),
+                    availableHeight: viewport.height - layout.gpsTop, entryWidth: layout.cardWidth,
+                    reservesExpandedHeight: true)
+                Color.clear
+                Color.clear
+            }
+            .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
             .background(Color(white: 0.94)).environment(\.colorScheme, .light))
-        window.frame = CGRect(x: 0, y: 0, width: 320, height: 500)
+        window.frame = CGRect(origin: .zero, size: viewport)
         window.rootViewController = host; window.isHidden = false
         defer { coordinator.setEnabled(false); window.isHidden = true; window.rootViewController = nil }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("gps-panel-sync")
@@ -1286,6 +1417,16 @@ final class GPSProtocolTests: XCTestCase {
         host.view.layoutIfNeeded()
         try await Task.sleep(for: .milliseconds(500))
         try capture("off")
+        func findPanel(in view: UIView) -> GeniePopupHostView? {
+            if let panel = view as? GeniePopupHostView { return panel }
+            return view.subviews.lazy.compactMap { findPanel(in: $0) }.first
+        }
+        let panel = try XCTUnwrap(findPanel(in: host.view))
+        func panelFrame() -> CGRect {
+            host.view.layoutIfNeeded()
+            return panel.convert(panel.bounds, to: window)
+        }
+        let off = panelFrame()
         coordinator.setEnabled(true)
         transport.emit(.ready("Camera"))
         coordinator.locationManager(manager, didUpdateLocations: [CLLocation(latitude: 31.2, longitude: 121.4)])
@@ -1295,6 +1436,69 @@ final class GPSProtocolTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(800))
         XCTAssertTrue(coordinator.state.canSyncNow)
         try capture("ready")
+        let ready = panelFrame()
+        XCTAssertGreaterThan(abs(ready.height - off.height), 2)
+        // This compact viewport actually exercises the height-dependent offset.
+        func unpinnedTop(_ panelHeight: CGFloat) -> CGFloat {
+            layout.cardsTop(reservingGPSHeight: panelHeight + 60, viewportHeight: viewport.height)
+        }
+        XCTAssertGreaterThan(abs(unpinnedTop(ready.height) - unpinnedTop(off.height)), 2)
+        XCTAssertEqual(ready.minY, off.minY, accuracy: 0.5)
+
+        // The long-press action calls this same coordinator entry point. Check
+        // intermediate layouts as well as the settled frame after disabling.
+        func disableAndCheckHeight(from start: CGRect) async throws -> CGRect {
+            coordinator.setEnabled(false)
+            let growing = off.height > start.height
+            var previous = start.height
+            for _ in 0..<40 {
+                try await Task.sleep(for: .milliseconds(8))
+                let frame = panelFrame()
+                XCTAssertEqual(frame.minY, off.minY, accuracy: 0.5)
+                XCTAssertGreaterThanOrEqual(frame.height, min(start.height, off.height) - 0.5)
+                XCTAssertLessThanOrEqual(frame.height, max(start.height, off.height) + 0.5)
+                if growing { XCTAssertGreaterThanOrEqual(frame.height, previous - 0.5) }
+                else { XCTAssertLessThanOrEqual(frame.height, previous + 0.5) }
+                previous = frame.height
+            }
+            return panelFrame()
+        }
+        let disabled = try await disableAndCheckHeight(from: ready)
+        XCTAssertEqual(disabled.maxY, off.maxY, accuracy: 0.5)
+        XCTAssertGreaterThan(abs(disabled.maxY - ready.maxY), 2)
+        try capture("disabled")
+
+        // Closing before the first fix grows the guide out of a short
+        // controls-only host. Check the painted surface, not just host bounds.
+        coordinator.setEnabled(true)
+        transport.emit(.ready("Camera"))
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertNil(coordinator.state.latitude)
+        let waiting = panelFrame()
+        XCTAssertLessThan(waiting.height, off.height - 40)
+        let waitingDisabled = try await disableAndCheckHeight(from: waiting)
+        XCTAssertEqual(waitingDisabled.height, off.height, accuracy: 0.5)
+        let snapshot = UIGraphicsImageRenderer(bounds: host.view.bounds).image { _ in
+            XCTAssertTrue(host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true))
+        }
+        let pixels = try XCTUnwrap(snapshot.cgImage)
+        let point = host.view.convert(CGPoint(x: off.maxX - 40, y: off.minY), from: window)
+        func red(at offset: CGFloat) throws -> UInt8 {
+            let rect = CGRect(x: floor(point.x * snapshot.scale), y: floor((point.y + offset) * snapshot.scale),
+                              width: 1, height: 1)
+            let pixel = try XCTUnwrap(pixels.cropping(to: rect))
+            var rgb = [UInt8](repeating: 0, count: 4)
+            try rgb.withUnsafeMutableBytes { bytes in
+                let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            return rgb[0]
+        }
+        XCTAssertLessThan(try red(at: -5), 247, "Panel must not paint above its upper edge")
+        XCTAssertGreaterThan(try red(at: 5), 247, "Panel begins directly below its upper edge")
+        try capture("disabled-before-first-fix")
     }
 
     @MainActor

@@ -15,18 +15,20 @@ struct GPSConnectionControl: View {
     let availableHeight: CGFloat
     private let entryWidth: CGFloat
     private let reservesExpandedHeight: Bool
+    private let onPanelVisibilityChanged: ((Bool) -> Void)?
     @State private var showHelp = false
     @State private var ambientOrigin = Date()
     @Environment(\.scenePhase) private var scenePhase
     @State private var hintText: String?
     @State private var panelVisible = false
+    @State private var panelHeight: CGFloat?
     #if DEBUG
     var didRender: (() -> Void)?
     #endif
 
     init(coordinator: GPSCoordinator, expanded: Binding<Bool>, showingResetPairing: Binding<Bool>,
          availableHeight: CGFloat, entryWidth: CGFloat = 280,
-         reservesExpandedHeight: Bool = false) {
+         reservesExpandedHeight: Bool = false, onPanelVisibilityChanged: ((Bool) -> Void)? = nil) {
         self.coordinator = coordinator
         _entry = StateObject(wrappedValue: GPSEntryPresentation(coordinator))
         _expanded = expanded
@@ -34,6 +36,7 @@ struct GPSConnectionControl: View {
         self.availableHeight = availableHeight
         self.entryWidth = entryWidth
         self.reservesExpandedHeight = reservesExpandedHeight
+        self.onPanelVisibilityChanged = onPanelVisibilityChanged
         _panelVisible = State(initialValue: expanded.wrappedValue)
     }
 
@@ -109,27 +112,37 @@ struct GPSConnectionControl: View {
             .geniePopupAnchor(.gps)
             .accessibilityIdentifier("popup-trigger-gps")
             GeniePopupPanel(
-                content: GPSInlinePanel(
-                    coordinator: coordinator,
-                    countdownActive: expanded || panelVisible,
-                    showHelp: $showHelp,
-                    showingResetPairing: $showingResetPairing,
-                    hintText: $hintText,
-                    helpViewportHeight: max(1, availableHeight - panelTop)
-                ),
+                // The live SwiftUI content can resize before the UIKit host
+                // receives its new bounds. Lay it out from the top even in
+                // that interval, and publish its natural height to the host.
+                content: Color.clear.overlay(alignment: .topLeading) {
+                    GPSInlinePanel(
+                        coordinator: coordinator,
+                        countdownActive: expanded || panelVisible,
+                        showHelp: $showHelp,
+                        showingResetPairing: $showingResetPairing,
+                        hintText: $hintText,
+                        helpViewportHeight: max(1, availableHeight - panelTop)
+                    )
+                    .frame(width: panelWidth)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { height in
+                        if height > 0 && height != panelHeight { panelHeight = height }
+                    }
+                },
                 trigger: .gps,
-                targetProgress: expanded ? 1 : 0,
+                targetProgress: expanded && panelHeight != nil ? 1 : 0,
                 anchorX: source.midX / panelWidth,
                 anchorWidth: source.width / panelWidth,
                 anchorGap: -source.maxY,
+                fillsProposedSize: true,
                 mouthWidth: 80,
                 tiltEnabled: false,
                 onSettled: { progress in
                     if progress == 0 && !expanded && panelVisible { panelVisible = false }
                 }
             )
-            .frame(width: panelWidth)
-            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: panelWidth, height: panelHeight ?? 1, alignment: .topLeading)
         }
         .overlay(alignment: .topTrailing) {
             if let hintText {
@@ -141,6 +154,8 @@ struct GPSConnectionControl: View {
             }
         }
         .zIndex(expanded || panelVisible ? 2 : 0)
+        .onAppear { onPanelVisibilityChanged?(panelVisible) }
+        .onChange(of: panelVisible) { onPanelVisibilityChanged?($0) }
         .task(id: hintText) {
             guard hintText != nil else { return }
             try? await Task.sleep(for: .milliseconds(1_800))
@@ -238,28 +253,36 @@ private struct GPSInlinePanel: View {
         coordinator.state.latitude != nil && coordinator.state.longitude != nil
     }
 
-    private var showConnectionSteps: Bool {
-        guard !sessionEstablished else { return false }
+    private enum PrimaryContent: Hashable {
+        case guide, location, empty
+    }
+
+    private var primaryContent: PrimaryContent {
+        // Android resolves the off guide before consulting remembered session
+        // evidence. Coordinates and enabled reset together, while the local
+        // session latch is only cleared by onChange on the next render.
+        guard coordinator.state.enabled else { return .guide }
+        if hasCoordinates { return .location }
+        guard !sessionEstablished else { return .empty }
         switch coordinator.state.status {
         case .off, .starting, .searching, .needsCamera, .connecting, .pairing, .cameraConfirm, .error:
-            return true
+            return .guide
         default:
-            return false
+            return .empty
         }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let content = primaryContent
+        return VStack(alignment: .leading, spacing: 10) {
             Group {
-                if showConnectionSteps {
-                    connectionGuide
-                } else if hasCoordinates {
-                    locationContent
-                } else {
-                    Color.clear.frame(height: 0)
+                switch content {
+                case .guide: connectionGuide
+                case .location: locationContent
+                case .empty: Color.clear.frame(height: 0)
                 }
             }
-            .id(showConnectionSteps ? "guide" : (hasCoordinates ? "location" : "empty"))
+            .id(content)
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topLeading)))
             if let guidance = coordinator.state.permissionIssue?.message ?? coordinator.state.pairingGuidance {
                 Text(guidance)
@@ -343,8 +366,7 @@ private struct GPSInlinePanel: View {
                 updateSessionEvidence()
             }
         }
-        .animation(.easeInOut(duration: 0.24), value: showConnectionSteps)
-        .animation(.easeInOut(duration: 0.24), value: hasCoordinates)
+        .animation(.timingCurve(0.4, 0, 0.2, 1, duration: 0.24), value: content)
         .animation(.easeInOut(duration: 0.17), value: coordinator.placeLookupState)
         .animation(.easeInOut(duration: 0.18), value: showHelp)
         .task(id: updateBurstID) {

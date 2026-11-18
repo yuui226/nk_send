@@ -31,10 +31,9 @@ let photoPreviewLongPressDuration = 0.20
 private let photoTransferLongPressDuration = 0.25
 
 /// FileListScreen's combinedClickable resolves a hold before its release tap.
-/// Separate onTapGesture/onLongPressGesture modifiers let SwiftUI wait for the
-/// tap to fail (~750ms in actual touch tests), regardless of the hold threshold.
-/// One exclusive gesture starts the hold timer immediately; moving >12pt still
-/// fails it so the enclosing ScrollView can pan. Burst buttons own their input.
+/// iOS 17 loses short taps in SwiftUI's exclusive long-press/tap composition.
+/// UIKit's failure dependency preserves both quick taps and the scroll view's
+/// pan, while recognizing a stationary hold before release. Burst owns its input.
 private struct PhotoCellInput: ViewModifier {
     var enabled: Bool
     var duration: Double
@@ -46,21 +45,15 @@ private struct PhotoCellInput: ViewModifier {
 
     func body(content: Content) -> some View {
         if enabled {
-            content.gesture(
-                LongPressGesture(minimumDuration: duration, maximumDistance: 12)
-                    .exclusively(before: TapGesture())
-                    .onEnded { value in
-                        switch value {
-                        case .first(true):
-                            // The accepted enqueue owns the one confirmation.
-                            // Stop anticipation without changing gesture recognition.
-                            haptics.cancelProgressiveHold()
-                            onHold()
-                        case .second: onTap()
-                        default: break
-                        }
-                    }
-            )
+            content
+            .overlay {
+                ZTransferTapAndHoldInput(duration: duration, onTap: onTap, onHold: {
+                    haptics.cancelProgressiveHold()
+                    onHold()
+                })
+                .accessibilityHidden(true)
+            }
+            .accessibilityAction { onTap() }
             .background {
                 if feedbackForTransfer {
                     ZTransferHoldTouchObservation(haptics: haptics,
@@ -634,7 +627,7 @@ private struct PhotoListSessionTaskID: Equatable {
                                             cameraRemoval: cameraRemovalAffectedDays.contains(section.day)
                                         ))
                                         .modifier(PhotoCellInput(
-                                            enabled: entry.isPhoto,
+                                            enabled: entry.isPhoto && !transferExiting,
                                             duration: tapToPreview ? photoTransferLongPressDuration : photoPreviewLongPressDuration,
                                             feedbackForTransfer: tapToPreview,
                                             onTap: { handleTap(entry, file: file) },

@@ -650,7 +650,8 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             pendingAltitudeRefresh = false
         case .scanning:
             bluetoothFailureOwnsRecovery = false
-            if !preserveReadyDuringReconnect { state.status = .searching; state.message = nil }
+            if pairingConfirmationPending && bluetooth.hasPairingIdentity { showPairingVerification() }
+            else if !preserveReadyDuringReconnect { state.status = .searching; state.message = nil }
             warmLocationIfRequested()
         case .connecting(let name):
             bluetoothFailureOwnsRecovery = false
@@ -664,8 +665,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         case .verifyingPairing(let name):
             pairingConfirmationPending = true
             state.cameraName = name
-            state.status = .connecting
-            state.message = AppLocalized.text("正在确认配对")
+            showPairingVerification()
         case .ready(let name):
             if let issue = currentPermissionIssue() {
                 presentPermissionIssue(issue)
@@ -706,6 +706,8 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
             if preserveReadyDuringReconnect {
                 state.status = .ready
                 state.message = AppLocalized.text("正在重连")
+            } else if pairingConfirmationPending && bluetooth.hasPairingIdentity {
+                showPairingVerification()
             } else {
                 state.status = bluetooth.hasPairingIdentity ? .connecting : .searching
                 state.message = bluetooth.hasPairingIdentity ? AppLocalized.text("正在重连") : nil
@@ -721,10 +723,17 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         }
     }
 
+    private func showPairingVerification() {
+        state.status = .connecting
+        state.message = AppLocalized.text("正在确认配对")
+    }
+
     /// Mirrors NikonGpsService.handleBleError's ordered message mapping. The
     /// BLE client may report protocol/transport English strings, but Android
     /// converts the user-visible result into a camera-action state first.
     func applyBluetoothFailure(_ message: String) {
+        let policy = GPSBluetoothFailurePolicy(message)
+        if policy.retries, !policy.invalidatesIdentity, bluetooth.retryPairingVerification() { return }
         locationWarmupRequested = false
         bluetoothFailureOwnsRecovery = true
         GPSDiagnostics.record("error=\(message)")
@@ -740,7 +749,6 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
         pairingConfirmationPending = false
         preserveReadyDuringReconnect = false
         stopLocationUpdates()
-        let policy = GPSBluetoothFailurePolicy(message)
         awaitingPairingAction = policy.waitsForPairing
         if policy.invalidatesIdentity { bluetooth.clearPairing() }
         // Match Android: permission/unavailable errors do not manufacture
@@ -905,6 +913,7 @@ final class GPSCoordinator: NSObject, ObservableObject, @preconcurrency CLLocati
                 applyBluetoothFailure("GPS write timeout")
                 return
             }
+            if bluetooth.retryPairingVerification() { return }
             state.status = .error
             state.message = AppLocalized.text("GPS 写入失败")
             // Android's independent ticker remains alive after an explicit

@@ -1918,8 +1918,12 @@ final class DomainModelTests: XCTestCase {
         XCTAssertEqual(normalizedSkinPreset(nil), ZTransferButtonSkin.defaultPreset.rawValue)
         XCTAssertEqual(normalizedSkinPreset("WOOD"), "WOOD")
         if #available(iOS 26.0, *) {
+            XCTAssertEqual(ZTransferButtonSkin.defaultPreset, .liquidGlass)
+            XCTAssertEqual(ZTransferButtonSkin(storedValue: "LIQUID_GLASS"), .liquidGlass)
             XCTAssertEqual(normalizedSkinPreset("LIQUID_GLASS"), "LIQUID_GLASS")
         } else {
+            XCTAssertEqual(ZTransferButtonSkin.defaultPreset, .frostedGlass)
+            XCTAssertEqual(ZTransferButtonSkin(storedValue: "LIQUID_GLASS"), .frostedGlass)
             XCTAssertEqual(normalizedSkinPreset("LIQUID_GLASS"), "FROSTED_GLASS")
         }
         XCTAssertEqual(normalizedSkinPreset("retired_skin"), "TITANIUM")

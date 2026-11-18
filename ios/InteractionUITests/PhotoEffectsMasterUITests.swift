@@ -142,6 +142,23 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         XCTAssertTrue(state.label.contains("comparison=0"))
     }
 
+    func testWheelTapStillAdvancesWhenHoldActionExists() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--gesture-audit-ui-test", "--audit-wheel"]
+        app.launch()
+        defer { app.terminate() }
+        let wheel = app.buttons["Audit wheel"]
+        XCTAssertTrue(wheel.waitForExistence(timeout: 10))
+        XCTAssertEqual(wheel.value as? String, "5")
+        wheel.tap()
+        XCTAssertEqual(wheel.value as? String, "6")
+        wheel.press(forDuration: 0.55)
+        XCTAssertEqual(wheel.value as? String, "6")
+        wheel.tap()
+        XCTAssertEqual(wheel.value as? String, "7")
+    }
+
     func testWheelHoldRecognizesBeforeReleaseAndDoesNotCommit() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -200,6 +217,10 @@ final class PhotoEffectsMasterUITests: XCTestCase {
         app.buttons["read-trace"].tap()
         let json = try XCTUnwrap(app.staticTexts["interaction-trace"].value as? String)
         let trace = try JSONDecoder().decode([Event].self, from: Data(json.utf8))
+        let evidence = XCTAttachment(string: json)
+        evidence.name = holdAction ? "wheel-drag-with-hold" : "wheel-drag-without-hold"
+        evidence.lifetime = .keepAlways
+        add(evidence)
         XCTAssertEqual(trace.filter { $0.event == "wheel-commit" }.count, 1)
         XCTAssertFalse(trace.contains { $0.event == "wheel-hold" })
         XCTAssertNotEqual(wheel.value as? String, "5")

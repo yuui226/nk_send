@@ -238,9 +238,11 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
             let down = try XCTUnwrap(trace.first { $0.event == "touch-down" })
             let up = try XCTUnwrap(trace.first { $0.event == "touch-up" && $0.milliseconds > down.milliseconds })
             let hold = try XCTUnwrap(trace.first { $0.event == "photo-long-press" })
+            let requested = try XCTUnwrap(trace.first { $0.event == "preview-request" })
             let appeared = try XCTUnwrap(trace.first { $0.event == "preview-appear" })
             XCTAssertLessThan(hold.milliseconds - down.milliseconds, 350, "Threshold must run from actual touch-down")
-            XCTAssertLessThan(appeared.milliseconds - down.milliseconds, 500, "Preview must start without waiting for release")
+            XCTAssertLessThan(requested.milliseconds - down.milliseconds, 350,
+                "Preview must be requested at recognition, including on older runtimes")
             XCTAssertLessThan(appeared.milliseconds, up.milliseconds)
             XCTAssertEqual(trace.filter { $0.event == "photo-long-press" }.count, 1)
             XCTAssertEqual(trace.filter { $0.event == "haptic-preview" }.count, 1)
@@ -259,7 +261,10 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [queued], timeout: 5), .completed)
         XCTAssertFalse(app.staticTexts["preview-state"].exists)
         app.buttons["clear-trace"].tap()
+        let day = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "enqueue-day-")).firstMatch
+        let dayY = day.frame.minY
         center.press(forDuration: 0.03, thenDragTo: center.withOffset(CGVector(dx: 0, dy: -150)))
+        XCTAssertLessThan(day.frame.minY, dayY - 60, "The grid must move during the cancelled hold")
         let trace = try readHoldTrace(app, name: "photo-scroll-cancels-hold")
         XCTAssertFalse(trace.contains { $0.event == "photo-long-press" })
         XCTAssertFalse(app.staticTexts["preview-state"].exists)
@@ -301,7 +306,10 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         defer { app.terminate() }
         let center = firstGridCenter(app)
         app.buttons["clear-trace"].tap()
+        let day = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "enqueue-day-")).firstMatch
+        let dayY = day.frame.minY
         center.press(forDuration: 0.06, thenDragTo: center.withOffset(CGVector(dx: 0, dy: -150)))
+        XCTAssertLessThan(day.frame.minY, dayY - 60, "The grid must move during the cancelled transfer hold")
         let trace = try readHoldTrace(app, name: "reverse-scroll-haptic-cancel")
         XCTAssertTrue(trace.contains { $0.event == "haptic-holdStarted" })
         XCTAssertTrue(trace.contains { $0.event == "haptic-holdCancelled" })
@@ -309,6 +317,26 @@ final class PhotoPreviewInteractionUITests: XCTestCase {
         XCTAssertFalse(trace.contains { $0.event == "photo-long-press" })
         XCTAssertTrue(trace.contains { $0.event == "photo-scroll" })
         XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=0"))
+    }
+
+    func testPhotoTapAfterRecognizedHoldStartsAFreshInteraction() throws {
+        continueAfterFailure = false
+        let app = launchHoldFixture(["--defer-admission", "--preview-admission"])
+        defer { app.terminate() }
+        let center = firstGridCenter(app)
+        center.press(forDuration: 0.32)
+        let queued = XCTNSPredicateExpectation(predicate:
+            NSPredicate(format: "label CONTAINS %@", "count=1;waiting=1"),
+            object: app.staticTexts["admission-state"])
+        XCTAssertEqual(XCTWaiter.wait(for: [queued], timeout: 5), .completed)
+        XCTAssertFalse(app.staticTexts["preview-state"].exists)
+        app.buttons["clear-trace"].tap()
+        center.tap()
+        XCTAssertTrue(app.staticTexts["preview-state"].waitForExistence(timeout: 5))
+        let trace = try readHoldTrace(app, name: "photo-tap-after-hold")
+        XCTAssertEqual(trace.filter { $0.event == "preview-request" }.count, 1)
+        XCTAssertFalse(trace.contains { $0.event == "photo-long-press" })
+        XCTAssertTrue(app.staticTexts["admission-state"].label.contains("count=1;waiting=1"))
     }
 
     func testEffectsPopupHoldDragAndReturnKeepsPreview() {

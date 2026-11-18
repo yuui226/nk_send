@@ -203,7 +203,11 @@ struct GPSGestureAuditHarness: View {
             coordinator.setEnabled(true)
             coordinator.applyBluetoothState(.ready("Gesture fixture"))
         }
-        .onChange(of: coordinator.state.enabled) { ButtonInteractionTrace.recordNow($0 ? "gps-on" : "gps-off") }
+        // Record the state change at publication. SwiftUI's onChange runs
+        // during the next render and can include popup layout time.
+        .onReceive(coordinator.$state.map(\.enabled).removeDuplicates()) { enabled in
+            ButtonInteractionTrace.recordNow(enabled ? "gps-on" : "gps-off")
+        }
         .onDisappear { coordinator.setEnabled(false); ButtonInteractionTrace.enabled = false }
     }
     private final class Bluetooth: GPSBluetoothTransport {

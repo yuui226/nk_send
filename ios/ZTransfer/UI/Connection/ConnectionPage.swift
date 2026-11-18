@@ -16,6 +16,7 @@ struct ConnectionPage: View {
     let celebrationStart: Date?
     let onOpenWorkspace: () -> Void
     @Binding var gpsPanelPresented: Bool
+    @State private var gpsPanelVisible = false
     @State private var showSettings = false
     @State private var showSTAReset = false
     @State private var showGPSReset = false
@@ -51,7 +52,7 @@ struct ConnectionPage: View {
                 let layout = ConnectionLayout(size: proxy.size)
                 ZStack(alignment: .topLeading) {
                     ZTransferColors.background.ignoresSafeArea()
-                    ConnectionSceneLayout(viewport: proxy.size) {
+                    ConnectionSceneLayout(viewport: proxy.size, keepsGPSPanelAnchor: gpsPanelPresented || gpsPanelVisible) {
                         ConnectionMethodCard(
                             mode: .usb, state: model.state,
                             height: layout.usbHeight,
@@ -72,7 +73,8 @@ struct ConnectionPage: View {
                                 showingResetPairing: $showGPSReset,
                                 availableHeight: max(1, proxy.size.height - layout.gpsTop),
                                 entryWidth: layout.cardWidth,
-                                reservesExpandedHeight: true
+                                reservesExpandedHeight: true,
+                                onPanelVisibilityChanged: { gpsPanelVisible = $0 }
                             )
                         }
                         .zIndex(1)
@@ -401,22 +403,38 @@ struct ConnectionLayout {
     }
 }
 
-/// The GPS child exposes its already-mounted panel's natural footprint even
-/// while closed. Measure and place in one layout pass, with no duplicate panel,
-/// preference/state feedback, or expansion-driven movement of the cards.
-private struct ConnectionSceneLayout: Layout {
+/// Reserve room for the mounted GPS detail before opening. While open, keep
+/// that placement so the guide, coordinates and hints can resize downward.
+struct ConnectionSceneLayout: Layout {
     let viewport: CGSize
+    let keepsGPSPanelAnchor: Bool
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    struct Cache {
+        var viewport: CGSize = .zero
+        var cardsTop: CGFloat?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    // Content updates can invalidate intrinsic sizes, not the open anchor.
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {}
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         viewport
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews,
-                       cache: inout ()) {
+                       cache: inout Cache) {
         guard subviews.count == 4 else { return }
         let layout = ConnectionLayout(size: viewport)
         let gpsSize = subviews[1].sizeThatFits(.init(width: layout.cardWidth, height: nil))
-        let top = layout.cardsTop(reservingGPSHeight: gpsSize.height, viewportHeight: viewport.height)
+        if cache.viewport != viewport {
+            cache = Cache(viewport: viewport)
+        }
+        if !keepsGPSPanelAnchor || cache.cardsTop == nil {
+            cache.cardsTop = layout.cardsTop(reservingGPSHeight: gpsSize.height, viewportHeight: viewport.height)
+        }
+        let top = cache.cardsTop ?? layout.cardsTop
         let left = bounds.minX + layout.horizontalPadding
         subviews[0].place(at: CGPoint(x: left, y: bounds.minY + top), anchor: .topLeading,
                          proposal: .init(width: layout.cardWidth, height: layout.usbHeight))

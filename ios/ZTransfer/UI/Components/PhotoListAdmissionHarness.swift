@@ -25,9 +25,15 @@ struct PhotoListAdmissionHarness: View {
         preferences.set(ProcessInfo.processInfo.arguments.contains("--defer-admission"), forKey: "defer_transfer_start")
         preferences.set(ProcessInfo.processInfo.arguments.contains("--preview-admission"), forKey: "tap_to_preview")
         preferences.set(3, forKey: "thumbnail_columns")
+        if ProcessInfo.processInfo.arguments.contains("--stored-liquid-glass") {
+            preferences.set("LIQUID_GLASS", forKey: "skin_preset")
+        }
         let burst = ProcessInfo.processInfo.arguments.contains("--burst-admission")
         preferences.set(burst, forKey: "collapse_burst_photos")
         preferences.set(TransferStorageMode.unified.rawValue, forKey: TransferStorageMode.persistenceKey)
+        // This fixture creates local files and a synthetic directory grant.
+        // Keep queue completion independent of Photos permissions and imports.
+        preferences.set(TransferSaveDestination.folder.rawValue, forKey: TransferSaveDestination.persistenceKey)
         defaults = preferences
         let dateGroups = ProcessInfo.processInfo.arguments.contains("--date-group-motion-fixture")
         let lastID = dateGroups ? 718 : ProcessInfo.processInfo.arguments.contains("--scroll-hold-fixture") ? 760 : burst ? 703 : 702
@@ -66,10 +72,12 @@ struct PhotoListAdmissionHarness: View {
             .overlay(alignment: tracesHold ? .bottom : .top) {
                 HStack {
                     if tracesHold {
-                        Button("Clear") { ButtonInteractionTrace.reset() }
-                            .frame(width: 44, height: 44).accessibilityIdentifier("clear-trace")
-                        Button("Read") { trace = ButtonInteractionTrace.snapshot() }
-                            .frame(width: 44, height: 44).accessibilityIdentifier("read-trace")
+                        Button { ButtonInteractionTrace.reset() } label: {
+                            Text("Clear").frame(width: 44, height: 44).contentShape(Rectangle())
+                        }.accessibilityIdentifier("clear-trace")
+                        Button { trace = ButtonInteractionTrace.snapshot() } label: {
+                            Text("Read").frame(width: 44, height: 44).contentShape(Rectangle())
+                        }.accessibilityIdentifier("read-trace")
                         Text("Trace").accessibilityValue(trace).accessibilityIdentifier("interaction-trace")
                     }
                     Button(connected ? "Disconnect" : "Reconnect") { connected.toggle() }

@@ -3355,7 +3355,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = ZTransfer/ZTransfer.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 82;
+				CURRENT_PROJECT_VERSION = 83;
 				EXCLUDED_SOURCE_FILE_NAMES = "$(inherited) debug_sample_01.jpg debug_sample_fhd.jpg";
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -3376,7 +3376,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.05;
+				MARKETING_VERSION = 2.06;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ztransfer.ios;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -3391,7 +3391,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZTransfer/ZTransfer.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = StoreKit/SimulatorDebug.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 82;
+				CURRENT_PROJECT_VERSION = 83;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(SRCROOT)/ThirdParty/libjpeg-8bit/src",
@@ -3411,7 +3411,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 2.05;
+				MARKETING_VERSION = 2.06;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ztransfer.ios;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;

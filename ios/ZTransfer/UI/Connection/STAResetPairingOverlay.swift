@@ -85,7 +85,7 @@ struct GPSResetPairingOverlay: View {
                         in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                     )
                     Spacer().frame(height: 10)
-                    Text(AppLocalized.resource("gps_clear_pairing_message"))
+                    Text(AppLocalized.resource("gps_ios_clear_pairing_message"))
                         .zTransferTypography(.bodyMedium)
                         .foregroundStyle(ZTransferColors.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
