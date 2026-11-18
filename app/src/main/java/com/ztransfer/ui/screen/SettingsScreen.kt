@@ -1451,10 +1451,8 @@ fun SettingsOverlay(
                             }
                         },
                         onDetent = haptics::tick,
-                        // 文A and the globe stay put when the interface language changes.
-                        // The spoken name still follows the current language.
                         label = stringResource(R.string.language),
-                        labelBadge = "文A",
+                        labelBadge = stringResource(R.string.language),
                         labelIconContent = { color, size -> LanguageGlobeMark(color, size) },
                         wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                         optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
