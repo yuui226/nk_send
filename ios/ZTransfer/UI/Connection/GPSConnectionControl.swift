@@ -507,7 +507,7 @@ private struct GPSInlinePanel: View {
                 }
             }
             .zIndex(2)
-            Text(AppLocalized.formattedResource("gps_altitude_value", ["%1$d": "\(Int((coordinator.state.altitudeMeters ?? 0).rounded()))"]))
+            Text(AppLocalized.formattedResource("gps_altitude_value", ["%1$d": "\(NikonGeoPayloadEncoder.roundedAltitudeMeters(coordinator.state.altitudeMeters ?? 0))"]))
                 .zTransferText(size: 15, weight: .semibold)
                 .frame(maxWidth: .infinity, minHeight: 42)
                 .background(ZTransferColors.statusConnected.opacity(detailFillOpacity), in: RoundedRectangle(cornerRadius: 16, style: .continuous))

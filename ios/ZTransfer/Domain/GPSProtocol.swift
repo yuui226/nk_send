@@ -93,9 +93,16 @@ final class NikonGPSPairingProtocol: @unchecked Sendable {
     ]
 }
 
-/// Nikon's 41-byte GEO payload, matching Android GeoPayloadEncoder byte for byte.
+/// Nikon's 41-byte GEO payload. iOS rounds altitude before encoding it.
 enum NikonGeoPayloadEncoder {
     private static let header: UInt16 = 0x007F
+
+    /// Both the panel and the camera use the same signed whole-meter value.
+    static func roundedAltitudeMeters(_ meters: Double) -> Int {
+        guard meters.isFinite else { return 0 }
+        let limit = Double(UInt16.max)
+        return Int(min(limit, max(-limit, meters.rounded())))
+    }
 
     static func encode(latitude: Double, longitude: Double, altitudeMeters: Double,
                        satellites: Int, timestamp: Date = Date()) -> Data? {
@@ -103,9 +110,9 @@ enum NikonGeoPayloadEncoder {
               longitude.isFinite, longitude >= -180, longitude <= 180 else { return nil }
         let lat = coordinate(latitude, positive: 0x4E, negative: 0x53, maxDegrees: 90)
         let lon = coordinate(longitude, positive: 0x45, negative: 0x57, maxDegrees: 180)
-        let altitude = altitudeMeters.isFinite ? altitudeMeters : 0
+        let altitude = roundedAltitudeMeters(altitudeMeters)
         let altitudeRef: UInt8 = altitude < 0 ? 0x4D : 0x50 // M/P
-        let altitudeAbs = UInt16(min(abs(altitude), 65_535))
+        let altitudeAbs = UInt16(abs(altitude))
         let components = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(secondsFromGMT: 0)!,
                                                                           from: timestamp)
         guard let year = components.year, let month = components.month, let day = components.day,

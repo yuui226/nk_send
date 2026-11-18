@@ -2372,7 +2372,7 @@ final class GPSProtocolTests: XCTestCase {
 
     func testGeoPayloadMatchesAndroidFieldLayout() {
         let payload = NikonGeoPayloadEncoder.encode(
-            latitude: 39.9042, longitude: -116.4074, altitudeMeters: -12.5,
+            latitude: 39.9042, longitude: -116.4074, altitudeMeters: -12,
             satellites: 14, timestamp: Date(timeIntervalSince1970: 1_735_787_045))
         guard let payload else { return XCTFail("payload rejected") }
         XCTAssertEqual(payload.count, 41)
@@ -2386,6 +2386,21 @@ final class GPSProtocolTests: XCTestCase {
         XCTAssertEqual(payload[13], 77)
         XCTAssertEqual(UInt16(payload[14]) | UInt16(payload[15]) << 8, 12)
         XCTAssertEqual(String(decoding: payload[25..<31], as: UTF8.self), "WGS-84")
+    }
+
+    func testGeoAltitudeRoundsToWholeMetersBeforeWritingToCamera() throws {
+        let cases: [(Double, Int)] = [
+            (10.49, 10), (10.5, 11), (10.7, 11), (-10.5, -11), (-0.4, 0),
+            (65_535.6, 65_535), (-65_535.6, -65_535), (.nan, 0), (.infinity, 0),
+        ]
+        for (meters, expected) in cases {
+            let packet = try XCTUnwrap(NikonGeoPayloadEncoder.encode(
+                latitude: 31, longitude: 121, altitudeMeters: meters, satellites: 0))
+            let magnitude = Int(packet[14]) | Int(packet[15]) << 8
+            XCTAssertEqual(packet[13], expected < 0 ? 0x4D : 0x50)
+            XCTAssertEqual(magnitude, abs(expected))
+            XCTAssertEqual(NikonGeoPayloadEncoder.roundedAltitudeMeters(meters), expected)
+        }
     }
 
     func testCachedAltitudeInclusiveAgeAndDistanceBoundaries() {
