@@ -4753,7 +4753,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /** A private, unfiltered review snapshot. It never publishes into or clears the album. */
-    internal suspend fun openRemoteReviewCatalog(expectedCamera: NikonCamera): RemoteReviewCatalog {
+    internal suspend fun openRemoteReviewCatalog(
+        expectedCamera: NikonCamera,
+        reviewFileCache: MutableMap<Int, NikonCamera.FileInfo>,
+    ): RemoteReviewCatalog {
         fun checkCamera() {
             if (camera !== expectedCamera || !_state.value.isConnectedToCamera) {
                 throw CancellationException("Review camera changed")
@@ -4761,7 +4764,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
         checkCamera()
         val sta = _state.value.isStaConnection
-        val cached = (indexedCameraFiles.values + _state.value.files).associateBy { it.handle }
         var storage = expectedCamera.getStorageIdsWithStatus(usePrefetched = false)
         repeat(2) {
             if (!storage.successful && storage.responseCode == PtpConstants.DEVICE_BUSY) {
@@ -4786,29 +4788,32 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             storageId to result.handles
         }
         checkCamera()
-        return RemoteReviewCatalog(newestFirstHandleOrders(handles).map { it.newestFirstHandles }) { handle ->
+        suspend fun readReviewFile(handle: Int): NikonCamera.FileInfo? {
             checkCamera()
-            cached[handle] ?: run {
-                var file: NikonCamera.FileInfo? = null
-                var succeeded = false
-                repeat(3) { attempt ->
-                    if (!succeeded) {
-                        if (attempt > 0) delay(250)
-                        checkCamera()
-                        succeeded = if (expectedCamera.staDirectObjectReadValidated) {
-                            expectedCamera.streamStaDirectFileInfo(listOf(handle), storageIds, batchSize = 1,
-                                onBatch = { batch, _, _ -> file = batch.firstOrNull() })
-                        } else {
-                            expectedCamera.streamFileInfo(listOf(handle), batchSize = 1,
-                                onBatch = { batch, _, _ -> file = batch.firstOrNull() })
-                        }
+            reviewFileCache[handle]?.let { return it }
+            indexedCameraFiles[handle]?.let { return it }
+            var file: NikonCamera.FileInfo? = null
+            var succeeded = false
+            repeat(3) { attempt ->
+                if (!succeeded) {
+                    if (attempt > 0) delay(250)
+                    checkCamera()
+                    succeeded = if (expectedCamera.staDirectObjectReadValidated) {
+                        expectedCamera.streamStaDirectFileInfo(listOf(handle), storageIds, batchSize = 1,
+                            onBatch = { batch, _, _ -> file = batch.firstOrNull() })
+                    } else {
+                        expectedCamera.streamFileInfo(listOf(handle), batchSize = 1,
+                            onBatch = { batch, _, _ -> file = batch.firstOrNull() })
                     }
                 }
-                checkCamera()
-                if (!succeeded) throw IOException("Review ObjectInfo: $handle")
-                file
             }
+            checkCamera()
+            if (!succeeded) throw IOException("Review ObjectInfo: $handle")
+            file?.let { reviewFileCache[handle] = it }
+            return file
         }
+        val orderedHandles = newestFirstHandleOrders(handles).map { it.newestFirstHandles }
+        return RemoteReviewCatalog(orderedHandles) { handle -> readReviewFile(handle) }
     }
 
     /**

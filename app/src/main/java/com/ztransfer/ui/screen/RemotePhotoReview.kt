@@ -62,7 +62,6 @@ import kotlinx.coroutines.withContext
 internal class PhotoReviewOptions(
     val loadPreview: suspend (NikonCamera.FileInfo, (ByteArray) -> Unit) -> ImageBitmap?,
     val loadMore: () -> Unit = {},
-    val loadingMore: Boolean = false,
     val loadMoreFailed: Boolean = false,
     val landscape: Boolean = false,
     val followLatest: Boolean = false,
@@ -242,13 +241,28 @@ internal fun RemotePhotoReview(
         // Also consume repeated Back presses during the fade and while the catalog loads.
         BackHandler { requestClose() }
         val transfer by transferViewModel.state.collectAsState()
+        val reviewFileCache = remember { mutableMapOf<Int, NikonCamera.FileInfo>() }
         var catalog by remember { mutableStateOf<RemoteReviewCatalog?>(null) }
         var items by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
-        var knownHandles by remember { mutableStateOf<Set<Int>>(emptySet()) }
-        var recentItems by remember { mutableStateOf<List<PhotoPreviewItem>>(emptyList()) }
         var loading by remember { mutableStateOf(true) }
         var failed by remember { mutableStateOf(false) }
         var retry by remember { mutableIntStateOf(0) }
+        fun previewItems(files: List<com.ztransfer.viewmodel.RemoteReviewPhoto>): List<PhotoPreviewItem> {
+            val existingKeys = buildMap {
+                for (item in items.filterIsInstance<PhotoPreviewItem.Photo>()) {
+                    val key = item.reviewKey ?: item.file.handle
+                    put(key, key)
+                    put(item.file.handle, key)
+                }
+            }
+            val photosByHandle = files.associateBy { it.file.handle }
+            return groupFilesByDate(files.map { it.file }).flatMap { group -> group.files }.map { file ->
+                val photo = photosByHandle.getValue(file.handle)
+                PhotoPreviewItem.Photo(photo.file, pairedRawExtension = photo.pairedRawExtension,
+                    reviewKey = photo.files.firstNotNullOfOrNull { existingKeys[it.handle] } ?: photo.key)
+            }
+        }
+
         fun stillCurrent() = state.camera === camera && cameraViewModel.getCamera() === camera
 
         suspend fun loadFirst() {
@@ -259,13 +273,11 @@ internal fun RemotePhotoReview(
                 // Let the camera finish registering the just-created object before enumerating it.
                 delay(200)
                 suspend fun read() {
-                    val snapshot = cameraViewModel.openRemoteReviewCatalog(camera)
+                    val snapshot = cameraViewModel.openRemoteReviewCatalog(camera, reviewFileCache)
                     val files = snapshot.loadNextPage()
                     if (!stillCurrent()) return
                     catalog = snapshot
-                    knownHandles = snapshot.handles
-                    items = files.map { PhotoPreviewItem.Photo(it.file,
-                        pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }
+                    items = previewItems(files)
                 }
                 try { read() }
                 catch (cancelled: CancellationException) { throw cancelled }
@@ -292,8 +304,9 @@ internal fun RemotePhotoReview(
                 scope.launch {
                     try {
                         val files = snapshot.loadNextPage()
-                        if (stillCurrent()) items = (recentItems + files.map { PhotoPreviewItem.Photo(it.file,
-                            pairedRawExtension = it.pairedRawExtension, reviewKey = it.key) }).distinctBy { it.key }
+                        if (stillCurrent() && catalog === snapshot) {
+                            items = previewItems(files)
+                        }
                     } catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) { failed = true }
                     finally { loading = false }
@@ -301,28 +314,28 @@ internal fun RemotePhotoReview(
             }
         }
         LaunchedEffect(retry) { loadFirst() }
-        LaunchedEffect(catalog) {
-            if (catalog == null) return@LaunchedEffect
+        LaunchedEffect(retry) {
             while (stillCurrent()) {
                 delay(1500)
+                val previous = catalog ?: continue
                 if (loading || closing) continue
                 try {
-                    val fresh = cameraViewModel.openRemoteReviewCatalog(camera)
-                    if (fresh.handles.any { it !in knownHandles }) {
-                        val existingKeys = items.filterIsInstance<PhotoPreviewItem.Photo>()
-                            .associate { it.file.handle to it.reviewKey }
-                        val addedCount = fresh.handles.count { it !in knownHandles }
-                        val head = fresh.loadNextPage(pageSize = maxOf(12, addedCount)).map { photo ->
-                            PhotoPreviewItem.Photo(photo.file, pairedRawExtension = photo.pairedRawExtension,
-                                reviewKey = photo.files.firstNotNullOfOrNull { existingKeys[it.handle] } ?: photo.key)
-                        }
-                        if (!stillCurrent()) return@LaunchedEffect
-                        val newestChanged = head.firstOrNull()?.key != items.firstOrNull()?.key
-                        recentItems = (head + recentItems).distinctBy { it.key }
-                        items = (recentItems + items).distinctBy { it.key }
-                        if (newestChanged && followLatest) followRevision++
+                    val fresh = cameraViewModel.openRemoteReviewCatalog(camera, reviewFileCache)
+                    if (loading || closing || !stillCurrent() || fresh.handles == previous.handles) continue
+                    for (removed in previous.handles - fresh.handles) reviewFileCache.remove(removed)
+                    val added = fresh.handles - previous.handles
+                    val refreshed = fresh.loadNextPage(pageSize = maxOf(12, items.size + added.size))
+                    if (loading || closing || !stillCurrent() || catalog !== previous) continue
+                    val next = previewItems(refreshed)
+                    val newestHandle = (next.firstOrNull() as? PhotoPreviewItem.Photo)?.file?.handle
+                    val newest = refreshed.firstOrNull { it.file.handle == newestHandle }
+                    val newCapture = newest != null && newest.files.all { it.handle in added }
+                    if (followLatest && newCapture && next.firstOrNull()?.key != items.firstOrNull()?.key) {
+                        followRevision++
                     }
-                    knownHandles = fresh.handles
+                    catalog = fresh
+                    items = next
+                    failed = false
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* A busy camera is retried on the next poll. */ }
             }
@@ -349,7 +362,7 @@ internal fun RemotePhotoReview(
                             }
                             image
                         },
-                        loadMore = loadMore, loadingMore = loading, loadMoreFailed = failed,
+                        loadMore = loadMore, loadMoreFailed = failed,
                         landscape = rotation != 0,
                         followLatest = followLatest, followRevision = followRevision,
                         onFollowLatestChanged = { enabled ->

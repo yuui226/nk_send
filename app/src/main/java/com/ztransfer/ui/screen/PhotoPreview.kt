@@ -122,6 +122,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
@@ -1076,32 +1077,38 @@ internal fun PhotoPreviewOverlay(
         loadExifFile(file)
     }
 
-    LaunchedEffect(items, review?.followRevision, review?.followLatest) {
+    LaunchedEffect(items, review?.followRevision, review?.followLatest, review?.followPhotoOrientation) {
         if (review == null) return@LaunchedEffect
         val follow = review.followRevision != appliedFollowRevision
         try {
             if (follow && review.followLatest) {
                 val target = (items.firstOrNull() as? PhotoPreviewItem.Photo)?.file
-                pendingFollowHandle = target?.handle
-                if (target != null) {
+                    ?: return@LaunchedEffect
+                pendingFollowHandle = target.handle
+                // Retry this capture even if the catalog does not change again. A newer
+                // capture or turning NEW off cancels this effect.
+                while (highResolutionBitmaps[target.handle] == null &&
+                    cameraViewModel.cachedThumbnail(target.handle) == null
+                ) {
                     cameraViewModel.withInteractivePreviewPriority {
                         loadHighResolutionPage(0, awaitExisting = true,
                             allowCameraRequest = cameraState.isConnectedToCamera, targetFile = target)
-                        // A preview JPEG often has no orientation tag, so a portrait frame is
-                        // still landscape pixels. Reveal only after that angle can no longer change.
-                        if (review.followPhotoOrientation &&
-                            target.extension !in VIDEO_EXTENSIONS &&
-                            !com.ztransfer.crop.reviewOrientationSettled(
-                                fhdOrientations[target.handle],
-                                exifFinished[target.handle] == true,
-                            )
+                        if (highResolutionBitmaps[target.handle] == null &&
+                            cameraState.isConnectedToCamera
                         ) {
-                            loadExifFile(target)
+                            cameraViewModel.loadThumbnail(target)
                         }
                     }
+                    if (highResolutionBitmaps[target.handle] == null &&
+                        cameraViewModel.cachedThumbnail(target.handle) == null
+                    ) delay(1500)
                 }
-                // Keep the current photo and gestures until the incoming image is decoded.
-                if (target == null || highResolutionBitmaps[target.handle] == null) return@LaunchedEffect
+                if (review.followPhotoOrientation && !com.ztransfer.crop.reviewOrientationSettled(
+                        fhdOrientations[target.handle], exifFinished[target.handle] == true,
+                    )
+                ) {
+                    cameraViewModel.withInteractivePreviewPriority { loadExifFile(target) }
+                }
                 followIncoming = false
                 followingLatest = true
                 reviewTap.cancel()
@@ -1112,6 +1119,7 @@ internal fun PhotoPreviewOverlay(
             if (followingLatest) {
                 // A short fade/slide has constant duration even when browsing hundreds of photos.
                 pagerState.scrollToPage(0)
+                appliedFollowRevision = review.followRevision
                 followIncoming = true
                 followVisibility.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
             }
@@ -1119,7 +1127,9 @@ internal fun PhotoPreviewOverlay(
         } finally {
             pendingFollowHandle = null
             followingLatest = false
-            followVisibility.snapTo(1f)
+            if (followVisibility.value != 1f) {
+                withContext(NonCancellable) { followVisibility.snapTo(1f) }
+            }
         }
     }
 
@@ -2029,11 +2039,14 @@ private fun PreviewPhotoTools(
             )
             BoxWithConstraints {
                 // 连拍成员最多多一个收起按钮；窄屏先减间距，再温和缩小按钮。
-                val actionCount = 3 + (if (effectsAvailable && effectsEnabled) 1 else 0) +
+                val verticalTools = reviewOptions?.landscape == true
+                val actionCount = if (isReview) 4 else 3 +
+                    (if (effectsAvailable && effectsEnabled) 1 else 0) +
                     (if (actions.canCollapseBurst) 1 else 0)
-                val actionGap = ((maxWidth - 44.dp * actionCount) / (actionCount - 1))
+                val availableSpace = if (verticalTools) maxHeight else maxWidth
+                val actionGap = ((availableSpace - 44.dp * actionCount) / (actionCount - 1))
                     .coerceIn(4.dp, 12.dp)
-                val actionSize = ((maxWidth - actionGap * (actionCount - 1)) / actionCount)
+                val actionSize = ((availableSpace - actionGap * (actionCount - 1)) / actionCount)
                     .coerceAtMost(44.dp)
                 Row(
                     modifier = Modifier.align(Alignment.CenterEnd),
@@ -2113,7 +2126,7 @@ private fun PreviewPhotoTools(
                                 },
                             )
                         }
-                        if (reviewOptions?.landscape == true) {
+                        if (verticalTools) {
                             Column(verticalArrangement = Arrangement.spacedBy(actionGap),
                                 horizontalAlignment = Alignment.CenterHorizontally) { imageTools() }
                         } else {
