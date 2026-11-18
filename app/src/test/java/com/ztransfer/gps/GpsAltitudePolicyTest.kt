@@ -73,7 +73,10 @@ class GpsAltitudePolicyTest {
     @Test
     fun missingAltitudeWritesZeroInsteadOfBlockingCoordinates() {
         assertEquals(0.0, cameraAltitudeForWrite(null), 0.0)
-        assertEquals(55.3, cameraAltitudeForWrite(55.3), 0.0)
+        assertEquals(55.0, cameraAltitudeForWrite(55.3), 0.0)
+        assertEquals(56.0, cameraAltitudeForWrite(55.5), 0.0)
+        assertEquals(-56.0, cameraAltitudeForWrite(-55.6), 0.0)
+        assertEquals(-55.0, cameraAltitudeForWrite(-55.5), 0.0)
     }
 
     @Test

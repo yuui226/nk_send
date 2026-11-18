@@ -1451,10 +1451,11 @@ fun SettingsOverlay(
                             }
                         },
                         onDetent = haptics::tick,
-                        // The globe stays recognizable after the interface language changes.
-                        // The spoken label still follows the current language.
+                        // 文A and the globe stay put when the interface language changes.
+                        // The spoken name still follows the current language.
                         label = stringResource(R.string.language),
-                        labelIcon = Icons.Filled.Language,
+                        labelBadge = "文A",
+                        labelIconContent = { color, size -> LanguageGlobeMark(color, size) },
                         wheelHeight = COMPACT_SETTINGS_WHEEL_HEIGHT,
                         optionRowHeight = COMPACT_SETTINGS_WHEEL_ROW_HEIGHT,
                         optionFontSize = COMPACT_SETTINGS_WHEEL_FONT_SIZE,
@@ -3763,7 +3764,7 @@ internal fun gpsAnimatedLayerActive(
 
 /** Missing altitude is presented as 0 m without changing its unknown internal state. */
 internal fun gpsDisplayedAltitudeMeters(altitudeMeters: Double?): Int =
-    altitudeMeters?.roundToInt() ?: 0
+    com.ztransfer.gps.cameraAltitudeForWrite(altitudeMeters).toInt()
 
 /** Whole seconds until the next scheduled GEO write, rounded up for a stable countdown. */
 internal fun gpsNextUpdateRemainingSeconds(

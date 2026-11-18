@@ -1,9 +1,12 @@
 package com.ztransfer.ui.screen
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
@@ -12,8 +15,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -55,6 +64,7 @@ internal fun ControlTileCornerBadge(
     contentPadding: PaddingValues = PaddingValues(horizontal = 6.dp),
     icon: ImageVector? = null,
     iconSize: Dp = 13.dp,
+    iconContent: (@Composable (Color, Dp) -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -63,24 +73,53 @@ internal fun ControlTileCornerBadge(
             .border(borderWidth, borderColor, shape),
         contentAlignment = Alignment.Center,
     ) {
-        if (icon != null) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = textColor,
-                modifier = Modifier
-                    .padding(contentPadding)
-                    .size(iconSize),
-            )
-        } else {
-            Text(
-                text = text,
-                color = textColor,
-                fontSize = fontSize,
-                lineHeight = (fontSize.value + 1f).sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                modifier = Modifier.padding(contentPadding),
+        Row(
+            modifier = Modifier.padding(contentPadding),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            when {
+                iconContent != null -> iconContent(textColor, iconSize)
+                icon != null -> Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = textColor,
+                    modifier = Modifier.size(iconSize),
+                )
+            }
+            if (text.isNotEmpty()) {
+                Text(
+                    text = text,
+                    color = textColor,
+                    fontSize = fontSize,
+                    lineHeight = (fontSize.value + 1f).sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** Circle, equator, and one meridian. A denser grid reads as a basketball at this size. */
+@Composable
+internal fun LanguageGlobeMark(color: Color, size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val stroke = this.size.minDimension * 0.085f
+        val radius = this.size.minDimension * 0.40f
+        val center = Offset(this.size.width / 2f, this.size.height / 2f)
+        val outline = Stroke(stroke)
+        drawCircle(color, radius, center, style = outline)
+        val disc = Path().apply {
+            addOval(Rect(center.x - radius, center.y - radius, center.x + radius, center.y + radius))
+        }
+        clipPath(disc) {
+            drawLine(color, Offset(center.x - radius, center.y), Offset(center.x + radius, center.y), stroke)
+            drawOval(
+                color,
+                topLeft = Offset(center.x - radius * 0.42f, center.y - radius),
+                size = Size(radius * 0.84f, radius * 2f),
+                style = outline,
             )
         }
     }

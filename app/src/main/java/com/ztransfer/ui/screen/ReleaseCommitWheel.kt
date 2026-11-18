@@ -103,6 +103,8 @@ internal fun <T> ReleaseCommitWheel(
     modifier: Modifier = Modifier,
     label: String? = null,
     labelIcon: ImageVector? = null,
+    labelBadge: String? = null,
+    labelIconContent: (@Composable (Color, Dp) -> Unit)? = null,
     onDetent: () -> Unit = {},
     onActivated: (() -> Unit)? = null,
     enabled: Boolean = true,
@@ -326,26 +328,37 @@ internal fun <T> ReleaseCommitWheel(
             )
         }
 
-        if (label != null || labelIcon != null) {
+        if (label != null || labelIcon != null || labelIconContent != null || labelBadge != null) {
             val compactBadge = wheelHeight <= 34.dp
-            val iconBadge = labelIcon != null
+            val hasIcon = labelIcon != null || labelIconContent != null
+            val badgeLabel = labelBadge ?: if (hasIcon) "" else label.orEmpty()
             ControlTileCornerBadge(
-                text = label.orEmpty(),
+                text = badgeLabel,
                 textColor = labelTextColor ?: badgeText,
                 backgroundColor = badgeBackground,
                 borderColor = badgeBorder,
                 borderWidth = 0.5.dp,
                 fontSize = if (compactBadge) 8.sp else 9.sp,
-                contentPadding = if (iconBadge) {
-                    androidx.compose.foundation.layout.PaddingValues(if (compactBadge) 1.5.dp else 2.dp)
-                } else {
-                    androidx.compose.foundation.layout.PaddingValues(
+                contentPadding = when {
+                    hasIcon && badgeLabel.isEmpty() -> androidx.compose.foundation.layout.PaddingValues(
+                        if (compactBadge) 1.5.dp else 2.dp,
+                    )
+                    hasIcon -> androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = if (compactBadge) 3.dp else 4.dp,
+                        vertical = 1.dp,
+                    )
+                    else -> androidx.compose.foundation.layout.PaddingValues(
                         horizontal = if (compactBadge) 4.dp else 6.dp,
                         vertical = 1.dp,
                     )
                 },
                 icon = labelIcon,
-                iconSize = if (compactBadge) 11.dp else 13.dp,
+                iconContent = labelIconContent,
+                iconSize = if (hasIcon && badgeLabel.isNotEmpty()) {
+                    if (compactBadge) 9.dp else 11.dp
+                } else {
+                    if (compactBadge) 11.dp else 13.dp
+                },
                 shape = RoundedCornerShape(bottomEnd = if (compactBadge) 4.dp else 5.dp),
                 modifier = Modifier
                     .align(Alignment.TopStart)

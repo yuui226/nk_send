@@ -1,6 +1,7 @@
 package com.ztransfer.gps
 
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 internal const val GPS_PROVIDER_NAME = "gps"
 internal const val GPS_ALTITUDE_MAX_AGE_MS = 2 * 60_000L
@@ -27,7 +28,9 @@ internal fun canReuseGpsAltitude(
 
 /** Coordinates must not be blocked indoors just because Android has no trustworthy altitude. */
 internal fun cameraAltitudeForWrite(trustedAltitudeMeters: Double?): Double =
-    trustedAltitudeMeters ?: GPS_FALLBACK_ALTITUDE_METERS
+    trustedAltitudeMeters?.takeIf { it.isFinite() }
+        ?.roundToInt()?.coerceIn(-65535, 65535)?.toDouble()
+        ?: GPS_FALLBACK_ALTITUDE_METERS
 
 /** The first trustworthy altitude after a fallback write should bypass the normal GEO cadence. */
 internal fun shouldForceTrustedAltitudeRefresh(
